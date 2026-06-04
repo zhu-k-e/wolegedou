@@ -1,0 +1,27 @@
+# ============================================================
+# 多智能体协同决策系统 - Python依赖
+# 安装方式: pip install -r requirements.txt
+# ============================================================
+
+# --- LLM 调用 ---
+openai>=1.0.0          # 兼容 OpenAI/DeepSeek/Qwen 等多API的通用客户端
+
+# --- Agent编排（可选，初期可直接手写调度逻辑） ---
+# langgraph>=0.2.0     # 多Agent状态图编排（P2阶段再启用）
+
+# --- 向量知识库 ---
+chromadb>=0.5.0        # 向量数据库（轻量，零配置）
+sentence-transformers>=2.2.0  # 中文文本向量化
+
+# --- 文档处理 ---
+pypdf>=4.0.0           # PDF解析
+markdown>=3.5.0        # Markdown解析
+beautifulsoup4>=4.12.0 # HTML解析（扒网页文档用）
+
+# --- 前端 ---
+streamlit>=1.30.0      # Web界面
+
+# --- 工具 ---
+python-dotenv>=1.0.0   # 读取.env配置文件
+pydantic>=2.0.0        # 数据校验（Agent输入输出结构化）
+loguru>=0.7.0          # 日志（比print好用，便于调试Agent链路）
