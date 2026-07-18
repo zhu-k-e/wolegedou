@@ -77,6 +77,8 @@ class Orchestrator:
         self.resource_agent = ResourceAgent()
         self.memory_service = get_memory_service()
         self._settings = get_settings()
+        # 缓存已完成任务的上下文，供延伸路径恢复使用
+        self._task_contexts: dict[str, TaskContext] = {}
 
     async def process_question(
         self,
@@ -102,6 +104,9 @@ class Orchestrator:
         try:
             # 主FSM循环
             await self._run_main_fsm(ctx)
+
+            # 缓存上下文供延伸路径使用
+            self._task_contexts[task_id] = ctx
 
             return {
                 "task_id": task_id,
@@ -479,50 +484,122 @@ class Orchestrator:
         return await self._do_heuristic_followup(task_id, event_data)
 
     async def _do_redimension(self, task_id: str, event_data: dict) -> dict:
-        """REDIMENSION: 降维解释"""
+        """REDIMENSION: 降维解释
+
+        对应方案书 6.1.3 节：资源生成Agent用降维Prompt重新生成同一知识点
+        """
         await ws_manager.push_state(task_id, FSMState.REDIMENSION.value)
 
-        # 获取原FocusedOutput（从event_data或缓存获取）
-        focused_data = event_data.get("focused_output")
-        profile_data = event_data.get("profile")
+        ctx = self._task_contexts.get(task_id)
+        if not ctx or not ctx.focused_outputs or not ctx.profile:
+            logger.warning(f"降维解释: task={task_id} 上下文不存在，跳过LLM调用")
+            return await self._do_heuristic_followup(task_id, event_data)
+
+        focused = ctx.focused_outputs[0]
         accuracy = event_data.get("accuracy", 0.5)
 
-        # 简化：使用ResourceAgent降维
-        # 实际实现需要从数据库恢复task上下文
-        result = {"action": "redimension", "accuracy": accuracy}
+        # 调用资源生成Agent降维解释
+        lecture = await self.resource_agent.generate_dimension_reduction(
+            focused, ctx.profile, accuracy
+        )
 
+        result = {
+            "action": "redimension",
+            "accuracy": accuracy,
+            "reduced_lecture": lecture.model_dump(),
+        }
+
+        logger.info(f"降维解释完成: task={task_id}, accuracy={accuracy:.0%}")
         await ws_manager.push_state(task_id, FSMState.REDIMENSION.value, result)
         return await self._do_heuristic_followup(task_id, event_data)
 
     async def _do_advance(self, task_id: str, event_data: dict) -> dict:
-        """ADVANCE: 进阶挑战"""
+        """ADVANCE: 进阶挑战
+
+        对应方案书 6.1.3 节：追加1道动态进阶题（跨知识点综合或边界条件挑战）
+        """
         await ws_manager.push_state(task_id, FSMState.ADVANCE.value)
 
-        result = {"action": "advance"}
+        ctx = self._task_contexts.get(task_id)
+        if not ctx or not ctx.focused_outputs or not ctx.profile:
+            logger.warning(f"进阶挑战: task={task_id} 上下文不存在，跳过LLM调用")
+            return await self._do_heuristic_followup(task_id, event_data)
 
+        focused = ctx.focused_outputs[0]
+
+        # 调用资源生成Agent进阶挑战
+        advance_question = await self.resource_agent.generate_advance_challenge(
+            focused, ctx.profile
+        )
+
+        result = {
+            "action": "advance",
+            "advance_question": advance_question.model_dump(),
+        }
+
+        logger.info(f"进阶挑战完成: task={task_id}")
         await ws_manager.push_state(task_id, FSMState.ADVANCE.value, result)
         return await self._do_heuristic_followup(task_id, event_data)
 
     async def _do_recheck(self, task_id: str, event_data: dict) -> dict:
-        """RECHECK: 审核复检"""
+        """RECHECK: 审核复检
+
+        对应方案书 6.1.3 节：审核团队对被质疑内容进行专项复检
+        复检通过→回复学生；发现错误→进入REDIMENSION修正
+        """
         await ws_manager.push_state(task_id, FSMState.RECHECK.value)
 
-        result = {"action": "recheck", "has_error": False}
+        ctx = self._task_contexts.get(task_id)
+        if not ctx or not ctx.focused_outputs:
+            logger.warning(f"审核复检: task={task_id} 上下文不存在，跳过LLM调用")
+            return await self._do_heuristic_followup(task_id, event_data)
 
+        focused = ctx.focused_outputs[0]
+        feedback = event_data.get("feedback", "")
+
+        # 调用裁判团复检
+        recheck_result = await self.judge_panel.recheck(focused, feedback)
+
+        result = {
+            "action": "recheck",
+            "has_error": recheck_result.get("has_error", False),
+            "error_detail": recheck_result.get("error_detail", ""),
+            "corrected_content": recheck_result.get("corrected_content", ""),
+        }
+
+        logger.info(f"审核复检完成: task={task_id}, has_error={result['has_error']}")
         await ws_manager.push_state(task_id, FSMState.RECHECK.value, result)
         if result.get("has_error"):
+            # 复检发现错误→进入降维修正
             return await self._do_redimension(task_id, event_data)
         return await self._do_heuristic_followup(task_id, event_data)
 
     async def _do_heuristic_followup(self, task_id: str, event_data: dict) -> dict:
-        """HEURISTIC_FOLLOWUP: 启发式追问导学"""
+        """HEURISTIC_FOLLOWUP: 启发式追问导学
+
+        对应方案书 6.1.3 节：学情诊断Agent基于上下文动态生成1-2个追问问题
+        """
         await ws_manager.push_state(task_id, FSMState.HEURISTIC_FOLLOWUP.value)
+
+        ctx = self._task_contexts.get(task_id)
+        if not ctx or not ctx.focused_outputs or not ctx.profile:
+            logger.warning(f"启发式追问: task={task_id} 上下文不存在，跳过LLM调用")
+            return {"action": "heuristic_followup", "followup_questions": []}
+
+        focused = ctx.focused_outputs[0]
+        recent_content = focused.model_dump_json(indent=2)
+
+        # 调用学情诊断Agent生成追问
+        followup_questions = await self.profile_agent.generate_heuristic_followup(
+            recent_content, ctx.profile
+        )
 
         result = {
             "action": "heuristic_followup",
-            "followup_questions": ["你能试着解释XX和YY的关系吗？"],
+            "followup_questions": followup_questions,
         }
 
+        logger.info(f"启发式追问完成: task={task_id}, questions={len(followup_questions)}")
         await ws_manager.push_state(task_id, FSMState.HEURISTIC_FOLLOWUP.value, result)
         return result
 
