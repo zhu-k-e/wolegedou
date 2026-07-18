@@ -88,12 +88,16 @@ class DomainAgent(BaseAgent):
         question: str,
         profile: StudentProfile,
         seg_id: str,
+        rag_context: Optional[str] = None,
     ) -> CandidateOutput:
         """候选输出：生成答案 + self_confidence自评估
 
         对应方案书 3.4.4 节：
           self_confidence在同一轮LLM调用中完成，不额外增加调用次数。
           如果问题涉及secondary_functions，confidence应≤0.7。
+
+        Args:
+            rag_context: 双低触发RAG增强时的检索结果文本（可选）
         """
         user_prompt = (
             f"学生问题：{question}\n"
@@ -116,6 +120,12 @@ class DomainAgent(BaseAgent):
             f'  }}\n'
             f"}}"
         )
+
+        # 双低RAG增强：补充知识库检索结果到prompt
+        if rag_context:
+            user_prompt += (
+                f"\n\n【知识库检索结果（请参考）】\n{rag_context}"
+            )
 
         result = await self.generate_and_validate(
             user_prompt=user_prompt,

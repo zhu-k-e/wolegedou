@@ -208,18 +208,36 @@ class JudgePanel:
     ) -> tuple[Verdict, DissentResolution]:
         """分歧解决（DISSENT_RESOLVE状态）
 
-        对应方案书 4.4.2 节：
-          第一层：裁判团分歧解决（少数方举证→多数方回应→僵持裁判长裁决）
-          第二层：候选Agent辩论（落选候选质疑+获胜候选辩护）
+        对应方案书 4.4.2 节完整版：
+          第一层：裁判团分歧解决
+            少数方举证 → 多数方回应 → 僵持裁判长裁决
+          第二层：候选Agent辩论（与第一层协同）
+            落选候选质疑 + 获胜候选辩护 → 辩论证据合并
         """
-        # 找出少数方
+        # 找出少数方和多数方
         minority = next(j for j in judges if j.judgment == "fail")
         majority = [j for j in judges if j.judgment == "pass"]
 
-        # 第一层：少数方举证
+        # === 第一层第一步：少数方举证（已有） ===
         minority_evidence = minority.evidence
 
-        # 第二层：候选Agent辩论（如果有落选候选）
+        # === 第一层第二步：多数方回应（新增） ===
+        # 多数方看到少数方证据后，必须回应：接受或反驳
+        majority_response_str, majority_reasoning = await self._majority_response(
+            minority_evidence, focused
+        )
+
+        # 根据多数方回应判断
+        if majority_response_str == "accepted":
+            # 多数方接受质疑 → 退回修改
+            verdict = Verdict.REVISE
+        else:
+            # 多数方反驳 → 僵持 → 裁判长裁决（新增）
+            verdict = await self._chief_judge_arbitrate(
+                minority_evidence, majority_reasoning, focused
+            )
+
+        # === 第二层：候选Agent辩论（与第一层协同） ===
         candidate_debate = None
         if losing_agent and winning_agent and losing_candidate and winning_candidate:
             # 落选候选质疑
@@ -243,28 +261,97 @@ class JudgePanel:
                 defense_evidence=defense_evidence,
             )
 
-        # 裁判团根据辩论证据重新判断
-        # 简化实现：如果辩论证据揭示实质问题 → revise，否则 → passed
-        all_evidence = minority_evidence
-        if candidate_debate:
-            all_evidence.extend(candidate_debate.challenge_evidence)
+            # 辩论证据可能改变裁决（MaW→C转化路径）
+            # 如果裁判长说通过，但候选辩论揭示了实质问题 → 改为REVISE
+            if verdict == Verdict.PASSED and len(challenge_evidence) > 0:
+                logger.info("候选辩论揭示新问题，改判为REVISE")
+                verdict = Verdict.REVISE
+                majority_response_str = "accepted_after_debate"
 
-        # 判断证据是否充分（简化：有证据则revise）
-        if len(all_evidence) > 0:
-            verdict = Verdict.REVISE
-            majority_response = "accepted"
-        else:
-            verdict = Verdict.PASSED
-            majority_response = "rejected"
-
-        logger.info(f"分歧解决完成: verdict={verdict}, evidence_count={len(all_evidence)}")
+        logger.info(
+            f"分歧解决完成: verdict={verdict}, "
+            f"majority_response={majority_response_str}, "
+            f"evidence_count={len(minority_evidence)}"
+        )
 
         return verdict, DissentResolution(
             minority_judge=minority.role,
             evidence_submitted=minority_evidence,
-            majority_response=majority_response,
+            majority_response=majority_response_str,
             candidate_debate=candidate_debate,
         )
+
+    async def _majority_response(
+        self,
+        minority_evidence: list[str],
+        focused: FocusedOutput,
+    ) -> tuple[str, list[str]]:
+        """多数方回应：看到少数方证据后判断接受或反驳
+
+        对应方案书 4.4.2 节：多数方（2人）必须回应
+
+        Returns:
+            (response: "accepted"/"rejected", reasoning: 多数方理由)
+        """
+        user_prompt = (
+            f"你是裁判团多数方（2名裁判认为通过）。少数方裁判提交了以下质疑证据：\n"
+            f"{'; '.join(minority_evidence)}\n\n"
+            f"被审查的输出：\n{focused.model_dump_json(indent=2)}\n\n"
+            f"请评估少数方的质疑是否成立。\n"
+            f"- 如果质疑确实揭示了实质问题（事实错误/逻辑缺陷/不适配）→ 接受(accepted)\n"
+            f"- 如果质疑不成立或只是小问题 → 反驳(rejected)\n"
+            f"输出JSON: {{\"response\": \"accepted\"或\"rejected\", "
+            f"\"reasoning\": [\"理由1\", \"理由2\"]}}"
+        )
+
+        raw = await self.judge_logic.generate(
+            user_prompt, tier=ModelTier.HIGH, temperature=0.0
+        )
+        data = json.loads(raw)
+        response = data.get("response", "rejected")
+        reasoning = [_safe_str(r) for r in data.get("reasoning", [])]
+
+        logger.info(f"多数方回应: {response}, reasoning={reasoning}")
+        return response, reasoning
+
+    async def _chief_judge_arbitrate(
+        self,
+        minority_evidence: list[str],
+        majority_reasoning: list[str],
+        focused: FocusedOutput,
+    ) -> Verdict:
+        """裁判长（裁判1-事实审查）最终裁决
+
+        对应方案书 4.4.2 节：双方僵持时裁判长裁决，事实准确性优先级最高
+        """
+        user_prompt = (
+            f"你是裁判长（事实审查裁判）。裁判团出现分歧：\n\n"
+            f"少数方质疑：{'; '.join(minority_evidence)}\n"
+            f"多数方反驳：{'; '.join(majority_reasoning)}\n\n"
+            f"被审查的输出：\n{focused.model_dump_json(indent=2)}\n\n"
+            f"作为裁判长，请做最终裁决（事实准确性优先级最高）：\n"
+            f"- 事实准确且逻辑完整 → passed\n"
+            f"- 有可修正的问题 → revise\n"
+            f"- 有严重事实错误 → failed\n"
+            f"输出JSON: {{\"verdict\": \"passed\"或\"revise\"或\"failed\", "
+            f"\"reasoning\": \"裁决理由\"}}"
+        )
+
+        raw = await self.judge_fact.generate(
+            user_prompt, tier=ModelTier.HIGH, temperature=0.0
+        )
+        data = json.loads(raw)
+        raw_verdict = data.get("verdict", "passed")
+
+        verdict_map = {
+            "passed": Verdict.PASSED,
+            "revise": Verdict.REVISE,
+            "failed": Verdict.FAILED,
+        }
+        verdict = verdict_map.get(raw_verdict, Verdict.PASSED)
+
+        logger.info(f"裁判长裁决: {verdict}, reasoning={data.get('reasoning', '')}")
+        return verdict
 
     async def _annotate_traceability(
         self, focused: FocusedOutput

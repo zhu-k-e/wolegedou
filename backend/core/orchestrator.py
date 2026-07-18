@@ -62,6 +62,9 @@ class TaskContext:
     losing_candidates: list[CandidateOutput] = field(default_factory=list)
     winning_candidates: list[CandidateOutput] = field(default_factory=list)
 
+    # P1-1: 双低触发的段索引（self_confidence都<0.5但知识库不可用时标记）
+    low_confidence_segments: set = field(default_factory=set)
+
 
 class Orchestrator:
     """编排器 - 驱动FSM状态机完成多智能体协同决策
@@ -261,6 +264,52 @@ class Orchestrator:
 
         ctx.candidate_outputs = [seg_map[seg.seg_id] for seg_id in [s.seg_id for s in segments]]
 
+        # P1-1: 候选自评估双低触发RAG增强（方案书§3.4.4 DyLAN落地）
+        # 如果两个候选的self_confidence都<0.5 → 触发知识库RAG增强
+        from backend.services.knowledge_base import get_knowledge_base
+        kb = get_knowledge_base()
+
+        for i, seg_outputs in enumerate(ctx.candidate_outputs):
+            both_low = all(co.self_confidence.score < 0.5 for co in seg_outputs)
+            if not both_low:
+                continue
+
+            seg = segments[i]
+            confidences = [co.self_confidence.score for co in seg_outputs]
+            logger.warning(
+                f"双低触发: seg={seg.seg_id}, domain={seg.domain}, "
+                f"confidences={confidences}"
+            )
+
+            # 尝试知识库RAG增强
+            rag_results = await kb.search(ctx.question, top_k=3)
+            if rag_results:
+                # 有检索结果，补充后重新生成
+                rag_context = "\n\n".join(
+                    f"[{r.source}] {r.content}" for r in rag_results
+                )
+                logger.info(
+                    f"RAG增强: seg={seg.seg_id}, 补充{len(rag_results)}条检索结果，重新生成候选"
+                )
+                regen_tasks = []
+                for co in seg_outputs:
+                    agent = DomainAgent(co.agent_id)
+                    task = agent.generate_candidate(
+                        question=ctx.question,
+                        profile=ctx.profile,
+                        seg_id=seg.seg_id,
+                        rag_context=rag_context,
+                    )
+                    regen_tasks.append(task)
+                regen_results = await asyncio.gather(*regen_tasks)
+                ctx.candidate_outputs[i] = list(regen_results)
+            else:
+                # 知识库不可用，标记低置信度段（审核团队会自然给出低分）
+                logger.warning(
+                    f"知识库未接入，双低段{seg.seg_id}无法RAG增强，标记低置信度"
+                )
+                ctx.low_confidence_segments.add(i)
+
         await ws_manager.push_state(
             ctx.task_id, FSMState.GENERATING.value,
             {"segments": len(ctx.candidate_outputs)},
@@ -306,17 +355,23 @@ class Orchestrator:
         ctx.losing_candidates = []
 
         for i, review in enumerate(ctx.review_feedbacks):
-            # 找到获胜和落选候选
+            # 找到获胜候选（早停场景下可能只有1个候选，没有落选候选）
             winner_candidate = next(c for c in review.candidates if c.is_winner)
-            loser_candidate = next(c for c in review.candidates if not c.is_winner)
+            loser_candidates_list = [c for c in review.candidates if not c.is_winner]
 
             # 找到对应的CandidateOutput
             winner_output = next(
                 co for co in ctx.candidate_outputs[i] if co.agent_id == winner_candidate.agent_id
             )
-            loser_output = next(
-                co for co in ctx.candidate_outputs[i] if co.agent_id == loser_candidate.agent_id
-            )
+
+            # 单候选（早停）场景：没有落选候选，辩论环节跳过
+            if loser_candidates_list:
+                loser_output = next(
+                    co for co in ctx.candidate_outputs[i] if co.agent_id == loser_candidates_list[0].agent_id
+                )
+                ctx.losing_candidates.append(loser_output)
+            else:
+                logger.info(f"段{review.seg_id}只有1个候选（早停），跳过落选候选记录")
 
             # 创建获胜Agent实例
             winning_agent = DomainAgent(winner_candidate.agent_id)

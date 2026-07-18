@@ -144,13 +144,20 @@ class Matcher:
     def _select_candidates(
         self, domain: str, profile: StudentProfile
     ) -> list[dict]:
-        """从Agent池遴选候选Agent（每段固定2个）
+        """从Agent池遴选候选Agent
 
         对应方案书 2.4 节：
           综合权重 = α × 功能匹配度 + (1-α) × importance_score(function_tag)
           α冷启动0.9 → 数据积累后0.3
+
+        对应方案书 2.4.4 节早停机制：
+          连续2轮importance_score波动<0.05 → 只选Top-1，节省API调用
         """
         alpha = config_repo.get_alpha()
+
+        # P1-3: 早停机制 — 检查importance_score历史波动
+        last_snapshot = config_repo.get_importance_snapshot()
+        current_snapshot = {}
 
         # 计算每个Agent的匹配度
         scored_agents = []
@@ -172,6 +179,9 @@ class Matcher:
             if is_suspended:
                 continue  # 被淘汰的跳过
 
+            # 记录当前快照
+            current_snapshot[card["agent_id"]] = importance
+
             # 综合权重
             composite = alpha * match_score + (1 - alpha) * importance
 
@@ -187,7 +197,22 @@ class Matcher:
         # 按综合权重排序，取Top-2
         scored_agents.sort(key=lambda x: x["composite_score"], reverse=True)
 
-        # 核心原则：每段固定2个候选Agent
+        # P1-3: 早停判断 — importance_score波动<0.05时只选Top-1
+        early_stop = False
+        if last_snapshot and current_snapshot:
+            all_stable = True
+            for agent_id, score in current_snapshot.items():
+                last_score = last_snapshot.get(agent_id, score)
+                if abs(score - last_score) >= 0.05:
+                    all_stable = False
+                    break
+            if all_stable:
+                early_stop = True
+                logger.info(
+                    f"早停触发: domain={domain}, importance_score波动<0.05，只选Top-1候选"
+                )
+
+        # 核心原则：每段固定2个候选Agent（早停时只选1个）
         # 即便只有1个"最匹配"的Agent，也必须从次匹配Agent中选一个补上
         if len(scored_agents) < 2:
             # 放宽匹配规则：从所有Agent中选
@@ -205,11 +230,17 @@ class Matcher:
                 if len(scored_agents) >= 2:
                     break
 
-        candidates = scored_agents[:2]
+        # 早停时只取1个，否则取2个
+        top_n = 1 if early_stop else 2
+        candidates = scored_agents[:top_n]
         logger.debug(
-            f"候选遴选: domain={domain}, "
+            f"候选遴选: domain={domain}, early_stop={early_stop}, "
             f"candidates={[(c['agent_id'], c['composite_score']) for c in candidates]}"
         )
+
+        # 更新importance_score快照（供下一轮早停判断）
+        config_repo.set_importance_snapshot(current_snapshot)
+
         return candidates
 
     def _compute_match_score(self, card: dict, domain: str) -> float:

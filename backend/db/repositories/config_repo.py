@@ -4,7 +4,7 @@
 """
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from backend.db.database import query_one, execute_sql
 
@@ -45,3 +45,16 @@ def get_review_weights() -> dict:
 def get_ema_smooth() -> float:
     """获取EMA平滑系数"""
     return get_config("ema_smooth", 0.8)
+
+
+def get_importance_snapshot() -> Optional[dict]:
+    """获取上一轮importance_score快照（用于早停判断）
+
+    对应方案书 2.4.4 节早停机制
+    """
+    return get_config("importance_snapshot", None)
+
+
+def set_importance_snapshot(snapshot: dict):
+    """更新importance_score快照"""
+    set_config("importance_snapshot", snapshot)
