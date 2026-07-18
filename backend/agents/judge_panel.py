@@ -115,6 +115,7 @@ class JudgePanel:
         self,
         focused_output: FocusedOutput,
         profile: StudentProfile,
+        question: str = "",
         winning_candidate: Optional[CandidateOutput] = None,
         losing_candidate: Optional[CandidateOutput] = None,
         losing_agent: Optional[DomainAgent] = None,
@@ -149,7 +150,7 @@ class JudgePanel:
         # 2:1 分歧
         elif pass_count == 2:
             verdict_value, dissent_resolution = await self._resolve_dissent(
-                focused_output, profile, judges,
+                focused_output, profile, judges, question,
                 winning_candidate, losing_candidate,
                 losing_agent, winning_agent,
             )
@@ -199,6 +200,7 @@ class JudgePanel:
         focused: FocusedOutput,
         profile: StudentProfile,
         judges: list[JudgeOpinion],
+        question: str,
         winning_candidate: Optional[CandidateOutput],
         losing_candidate: Optional[CandidateOutput],
         losing_agent: Optional[DomainAgent],
@@ -222,14 +224,14 @@ class JudgePanel:
         if losing_agent and winning_agent and losing_candidate and winning_candidate:
             # 落选候选质疑
             challenge_evidence = await losing_agent.debate_challenge(
-                question="",  # 从上下文获取
+                question=question,
                 winning_output=focused,
                 minority_opinion="; ".join(minority_evidence),
             )
 
             # 获胜候选辩护
             defense_evidence = await winning_agent.debate_defense(
-                question="",
+                question=question,
                 original_output=winning_candidate,
                 challenge_evidence=challenge_evidence,
             )

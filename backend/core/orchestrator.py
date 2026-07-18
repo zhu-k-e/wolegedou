@@ -347,9 +347,10 @@ class Orchestrator:
         ctx.judge_verdict = await self.judge_panel.judge(
             focused_output=focused,
             profile=ctx.profile,
+            question=ctx.question,
             winning_candidate=ctx.winning_candidates[0] if ctx.winning_candidates else None,
             losing_candidate=ctx.losing_candidates[0] if ctx.losing_candidates else None,
-            losing_agent=ctx.winning_agents[0] if ctx.winning_agents else None,
+            losing_agent=DomainAgent(ctx.losing_candidates[0].agent_id) if ctx.losing_candidates else None,
             winning_agent=ctx.winning_agents[0] if ctx.winning_agents else None,
         )
 

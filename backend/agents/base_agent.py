@@ -106,10 +106,7 @@ class BaseAgent:
             user_prompt, tier=tier, temperature=temperature, max_tokens=max_tokens
         )
 
-        result = self._validator.validate(raw_output, model_class, schema_hint)
-        if result is None:
-            # 第三层LLM修复（异步）
-            result = await self._validator._layer3_llm_repair(raw_output, model_class, schema_hint)
+        result = await self._validator.validate(raw_output, model_class, schema_hint)
 
         if result is None:
             raise SchemaValidationError(

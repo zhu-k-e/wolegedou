@@ -215,10 +215,11 @@ class DomainAgent(BaseAgent):
           落选候选收到anonymized质疑 → 认同提交补充证据 / 不认同提交反驳证据
         """
         user_prompt = (
+            f"原始问题：{question}\n\n"
             f"你是落选候选Agent。裁判团少数方提出了以下质疑：\n"
             f"质疑内容：{minority_opinion}\n\n"
             f"获胜候选的输出：\n{winning_output.model_dump_json(indent=2)}\n\n"
-            f"请评估该质疑是否合理，并提交你的证据（认同或反驳）。"
+            f"请结合原始问题评估该质疑是否合理，并提交你的证据（认同或反驳）。"
             f"输出JSON: {{\"evidence\": [\"证据1\", \"证据2\"]}}"
         )
 
@@ -242,10 +243,11 @@ class DomainAgent(BaseAgent):
         对应方案书 4.4.2 节：获胜候选必须提交辩护证据
         """
         user_prompt = (
+            f"原始问题：{question}\n\n"
             f"你是获胜候选Agent。落选候选和裁判少数方提出了以下质疑和证据：\n"
             f"质疑证据：{chr(10).join(challenge_evidence)}\n\n"
             f"你的原始输出：\n{original_output.answer.model_dump_json(indent=2)}\n\n"
-            f"请提交你的辩护证据。"
+            f"请结合原始问题提交你的辩护证据。"
             f"输出JSON: {{\"evidence\": [\"辩护证据1\", \"辩护证据2\"]}}"
         )
 

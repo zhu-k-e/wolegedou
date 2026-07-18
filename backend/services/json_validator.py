@@ -26,7 +26,7 @@ class JSONValidator:
     def __init__(self, llm_client: Optional[LLMClient] = None):
         self._llm = llm_client
 
-    def validate(
+    async def validate(
         self,
         raw_output: str,
         model_class: Type[T],
@@ -54,7 +54,7 @@ class JSONValidator:
 
         # 第三层：LLM修复（需要LLM客户端）
         if self._llm is not None:
-            result = self._layer3_llm_repair(raw_output, model_class, schema_hint)
+            result = await self._layer3_llm_repair(raw_output, model_class, schema_hint)
             if result is not None:
                 return result
 
