@@ -6,7 +6,6 @@
   3.6.4 降维解释与进阶挑战动态追加
 """
 
-import json
 from typing import Optional
 
 from loguru import logger
@@ -110,18 +109,19 @@ class ResourceAgent(BaseAgent):
             f"\"difficulty_note\": \"难度说明\"}}"
         )
 
-        raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.5)
-        data = json.loads(raw)
-
-        return Lecture(
-            title=data.get("title", "学习讲义"),
-            content_markdown=data.get("content_markdown", ""),
-            difficulty_note=data.get("difficulty_note", ""),
-            knowledge_refs_display=[
-                {"source": ref.source, "verification_status": "待验证"}
-                for ref in focused.knowledge_refs
-            ],
+        result = await self.generate_and_validate(
+            user_prompt=user_prompt,
+            model_class=Lecture,
+            tier=ModelTier.MID,
+            temperature=0.5,
         )
+
+        # 补充溯源标注（非LLM生成，从focused_output提取）
+        result.knowledge_refs_display = [
+            {"source": ref.source, "verification_status": "待验证"}
+            for ref in focused.knowledge_refs
+        ]
+        return result
 
     async def _generate_practice_guide(
         self, focused: FocusedOutput, profile: StudentProfile
@@ -136,18 +136,18 @@ class ResourceAgent(BaseAgent):
             f"- 有Python基础：跳过基础环境配置\n"
             f"- 有ML基础：增加参数调优说明\n\n"
             f"输出JSON: {{\"goal\": \"目标\", \"env_setup\": \"环境准备\", "
-            f"\"steps_markdown\": \"操作步骤\", \"common_issues\": [\"问题1\"]}}"
+            f"\"steps_markdown\": \"操作步骤\", "
+            f"\"expected_output\": \"预期输出（每步操作应得到的结果）\", "
+            f"\"common_issues\": [\"问题1\"]}}"
         )
 
-        raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.5)
-        data = json.loads(raw)
-
-        return PracticeGuide(
-            goal=data.get("goal", ""),
-            env_setup=data.get("env_setup", ""),
-            steps_markdown=data.get("steps_markdown", ""),
-            common_issues=data.get("common_issues", []),
+        result = await self.generate_and_validate(
+            user_prompt=user_prompt,
+            model_class=PracticeGuide,
+            tier=ModelTier.MID,
+            temperature=0.5,
         )
+        return result
 
     async def _generate_quiz(
         self, focused: FocusedOutput, profile: StudentProfile
@@ -172,11 +172,13 @@ class ResourceAgent(BaseAgent):
             f"【重要】type 只能是以下之一：判断、选择、简答、代码补全、设计分析"
         )
 
-        raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.7)
-        data = json.loads(raw)
-
-        questions = [QuizQuestion(**q) for q in data.get("questions", [])]
-        return Quiz(questions=questions)
+        result = await self.generate_and_validate(
+            user_prompt=user_prompt,
+            model_class=Quiz,
+            tier=ModelTier.MID,
+            temperature=0.7,
+        )
+        return result
 
     # ============================================================
     # 3.6.4 降维解释与进阶挑战
@@ -187,10 +189,12 @@ class ResourceAgent(BaseAgent):
         focused: FocusedOutput,
         profile: StudentProfile,
         accuracy: float,
-    ) -> Lecture:
-        """降维解释：当答题正确率低时重新生成
+        task_id: str = "",
+    ) -> ResourcePackage:
+        """降维解释：当答题正确率低时重新生成完整资源包
 
-        对应方案书 3.6.4 节降维Prompt模板
+        对应方案书 3.6.4 节降维Prompt模板。
+        降维后仍输出三种形态（讲义/实操/测试题），而非仅讲义。
         """
         level_str = profile.knowledge_level.value
         if level_str == "入门":
@@ -200,7 +204,8 @@ class ResourceAgent(BaseAgent):
         else:
             strategy = "复杂多步推理拆为子问题链，每步独立可验证，加中间验证节点，补充推导细节"
 
-        user_prompt = (
+        # 降维讲义
+        lecture_prompt = (
             f"学生答题正确率为{accuracy:.0%}，需要降维解释。\n"
             f"降维策略：{strategy}\n\n"
             f"原始知识内容：\n{focused.model_dump_json(indent=2)}\n\n"
@@ -208,15 +213,76 @@ class ResourceAgent(BaseAgent):
             f"输出JSON: {{\"title\": \"标题\", \"content_markdown\": \"降维讲义\", "
             f"\"difficulty_note\": \"降维版\"}}"
         )
-
-        raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.5)
-        data = json.loads(raw)
-
-        return Lecture(
-            title=data.get("title", "降维讲义"),
-            content_markdown=data.get("content_markdown", ""),
-            difficulty_note="降维版 - " + data.get("difficulty_note", ""),
+        lecture = await self.generate_and_validate(
+            user_prompt=lecture_prompt,
+            model_class=Lecture,
+            tier=ModelTier.MID,
+            temperature=0.5,
         )
+        lecture.difficulty_note = "降维版 - " + lecture.difficulty_note
+        lecture.knowledge_refs_display = [
+            {"source": ref.source, "verification_status": "待验证"}
+            for ref in focused.knowledge_refs
+        ]
+
+        # 降维实操指南（如果有代码示例）
+        practice_guide = None
+        if focused.code_example:
+            practice_prompt = (
+                f"学生答题正确率为{accuracy:.0%}，需要降维实操指南。\n"
+                f"降维策略：{strategy}\n\n"
+                f"原始知识内容：\n{focused.model_dump_json(indent=2)}\n\n"
+                f"请用降维策略重新生成实操指南，每步更详细。\n"
+                f"输出JSON: {{\"goal\": \"目标\", \"env_setup\": \"环境准备\", "
+                f"\"steps_markdown\": \"操作步骤\", "
+                f"\"expected_output\": \"预期输出\", "
+                f"\"common_issues\": [\"问题1\"]}}"
+            )
+            practice_guide = await self.generate_and_validate(
+                user_prompt=practice_prompt,
+                model_class=PracticeGuide,
+                tier=ModelTier.MID,
+                temperature=0.5,
+            )
+
+        # 降维测试题（降低难度）
+        quiz = None
+        quiz_trigger_types = {
+            QuestionType.CONCEPT, QuestionType.OPERATION, QuestionType.ARCHITECTURE
+        }
+        if profile.question_type in quiz_trigger_types:
+            quiz_prompt = (
+                f"学生答题正确率为{accuracy:.0%}，需要降维测试题。\n"
+                f"降维策略：题目难度全部降一级（进阶→应用→基础），减少干扰项。\n\n"
+                f"原始知识内容：\n{focused.model_dump_json(indent=2)}\n\n"
+                f"请生成3-5道降维测试题。\n"
+                f"输出JSON: {{\"questions\": [{{\"question\": \"题目\", \"type\": \"选择\", "
+                f"\"options\": [\"A\",\"B\"], \"answer\": \"答案\", \"explanation\": \"解析\", "
+                f"\"difficulty\": \"基础\"}}]}}\n"
+                f"【重要】difficulty 只能是以下之一：基础、应用、综合、进阶\n"
+                f"【重要】type 只能是以下之一：判断、选择、简答、代码补全、设计分析"
+            )
+            quiz = await self.generate_and_validate(
+                user_prompt=quiz_prompt,
+                model_class=Quiz,
+                tier=ModelTier.MID,
+                temperature=0.7,
+            )
+
+        package = ResourcePackage(
+            task_id=task_id,
+            lecture=lecture,
+            practice_guide=practice_guide,
+            quiz=quiz,
+            focused_output_ref=task_id,
+            profile_ref=profile.session_id or "",
+        )
+
+        logger.info(
+            f"降维资源包生成完成: task={task_id}, accuracy={accuracy:.0%}, "
+            f"lecture=✓, practice={'✓' if practice_guide else '✗'}, quiz={'✓' if quiz else '✗'}"
+        )
+        return package
 
     async def generate_advance_challenge(
         self,

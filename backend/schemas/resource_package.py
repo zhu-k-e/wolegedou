@@ -48,10 +48,17 @@ class Lecture(BaseModel):
 
 
 class PracticeGuide(BaseModel):
-    """实操指南（条件触发：FocusedOutput含code_example字段时生成）"""
+    """实操指南（条件触发：FocusedOutput含code_example字段时生成）
+
+    对应方案书 3.6.2 节实操指南设计
+    """
     goal: str
     env_setup: str = Field(description="环境准备（根据background字段调整）")
     steps_markdown: str = Field(description="步骤化操作（Markdown含代码块）")
+    expected_output: str = Field(
+        default="",
+        description="预期输出（每步操作应得到的结果，帮助学生自查是否正确）",
+    )
     common_issues: list[str] = Field(
         default_factory=list, description="常见问题排查"
     )

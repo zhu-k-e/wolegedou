@@ -150,13 +150,18 @@ class DomainAgent(BaseAgent):
         profile: StudentProfile,
         original_output: CandidateOutput,
         review_feedback: Optional[ReviewFeedback] = None,
+        judge_feedback: Optional[str] = None,
     ) -> FocusedOutput:
         """聚焦输出：最优Agent收到审核反馈后反思改进
 
         对应方案书 3.5 节：
-          - 不是重新生成，而是在原有会话中继续
+          - 不是重新生成，而是在原有会话中继续（保持LLM会话上下文）
           - 审核团队只传"具体问题"给Agent，不传评分数字
           - 如果审核团队没有发现问题（3人全高分），走原始流程
+          - 裁判团退回修改时，传入裁判具体反馈
+
+        Args:
+            judge_feedback: 裁判团退回修改时的具体反馈（可选）
         """
         # 构造审核反馈描述（只传具体问题，不传评分）
         feedback_str = "无（审核团队未发现明显问题）"
@@ -171,6 +176,22 @@ class DomainAgent(BaseAgent):
                             for issue in issues
                         )
                     break
+
+        # 裁判团退回修改时追加裁判反馈
+        if judge_feedback:
+            feedback_str = f"【裁判团退回修改】\n{judge_feedback}\n\n【审核团队反馈】\n{feedback_str}"
+
+        # 构建会话历史：把候选生成轮的问答作为上下文（方案书§3.5要求同一会话继续）
+        history = [
+            {
+                "role": "user",
+                "content": f"学生问题：{question}\n学情画像：{profile.model_dump_json(indent=2)}",
+            },
+            {
+                "role": "assistant",
+                "content": original_output.answer.model_dump_json(indent=2),
+            },
+        ]
 
         user_prompt = (
             f"【系统通知】\n"
@@ -204,6 +225,7 @@ class DomainAgent(BaseAgent):
             tier=ModelTier.HIGH,  # 聚焦输出用高档模型
             temperature=0.3,
             max_tokens=2048,
+            history=history,  # 保持LLM会话上下文
         )
 
         logger.info(f"聚焦输出完成: {self.agent_id}")

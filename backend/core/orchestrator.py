@@ -422,17 +422,38 @@ class Orchestrator:
         return ctx.judge_verdict
 
     async def _do_revising(self, ctx: TaskContext):
-        """REVISING: Agent根据裁判团反馈修改FocusedOutput"""
+        """REVISING: Agent根据裁判团反馈修改FocusedOutput
+
+        对应方案书§4.4.3：裁判团退回修改时，将具体反馈传给聚焦输出Agent
+        """
         await ws_manager.push_state(ctx.task_id, FSMState.REVISING.value)
         logger.info(f"退回修改: task={ctx.task_id}, revision={ctx.revision_count}")
 
-        # 简化：重新聚焦输出
+        # 提取裁判团具体反馈（裁判证据 + 分歧解决证据）
+        judge_feedback = None
+        if ctx.judge_verdict:
+            feedback_parts = []
+            for judge in ctx.judge_verdict.judges:
+                if judge.evidence:
+                    feedback_parts.append(
+                        f"[{judge.role}] 判定: {judge.judgment}, 证据: {'; '.join(judge.evidence)}"
+                    )
+            if ctx.judge_verdict.dissent_resolution:
+                dr = ctx.judge_verdict.dissent_resolution
+                feedback_parts.append(
+                    f"[分歧解决] 少数方({dr.minority_judge})证据: {'; '.join(dr.evidence_submitted)}, "
+                    f"多数方回应: {dr.majority_response}"
+                )
+            judge_feedback = "\n".join(feedback_parts) if feedback_parts else None
+
+        # 重新聚焦输出，传入裁判具体反馈
         for i, agent in enumerate(ctx.winning_agents):
             focused = await agent.generate_focused_output(
                 question=ctx.question,
                 profile=ctx.profile,
                 original_output=ctx.winning_candidates[i],
                 review_feedback=ctx.review_feedbacks[i] if i < len(ctx.review_feedbacks) else None,
+                judge_feedback=judge_feedback,
             )
             ctx.focused_outputs[i] = focused
 
@@ -553,15 +574,15 @@ class Orchestrator:
         focused = ctx.focused_outputs[0]
         accuracy = event_data.get("accuracy", 0.5)
 
-        # 调用资源生成Agent降维解释
-        lecture = await self.resource_agent.generate_dimension_reduction(
-            focused, ctx.profile, accuracy
+        # 调用资源生成Agent降维解释（返回完整资源包：讲义+实操+测试题）
+        reduced_package = await self.resource_agent.generate_dimension_reduction(
+            focused, ctx.profile, accuracy, task_id=task_id
         )
 
         result = {
             "action": "redimension",
             "accuracy": accuracy,
-            "reduced_lecture": lecture.model_dump(),
+            "reduced_resource_package": reduced_package.model_dump(),
         }
 
         logger.info(f"降维解释完成: task={task_id}, accuracy={accuracy:.0%}")

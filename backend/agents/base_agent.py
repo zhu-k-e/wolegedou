@@ -46,6 +46,7 @@ class BaseAgent:
         temperature: float = 0.7,
         max_tokens: int = 2048,
         use_json_mode: bool = True,
+        history: Optional[list[dict]] = None,
     ) -> str:
         """调用LLM生成内容
 
@@ -55,14 +56,17 @@ class BaseAgent:
             temperature: 温度（评分场景用0，生成场景用0.7）
             max_tokens: 最大输出token数
             use_json_mode: 是否使用JSON模式（第一层原生约束）
+            history: 之前的对话历史（同一会话上下文），格式为[{"role":"user","content":"..."},{"role":"assistant","content":"..."}]
 
         Returns:
             LLM输出的原始文本
         """
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_prompt},
         ]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": user_prompt})
 
         try:
             if use_json_mode:
@@ -85,6 +89,7 @@ class BaseAgent:
         temperature: float = 0.0,
         max_tokens: int = 2048,
         schema_hint: Optional[str] = None,
+        history: Optional[list[dict]] = None,
     ):
         """调用LLM生成内容并通过三层兜底校验
 
@@ -95,6 +100,7 @@ class BaseAgent:
             temperature: 温度
             max_tokens: 最大输出token数
             schema_hint: Schema描述（第三层LLM修复时使用）
+            history: 之前的对话历史（同一会话上下文）
 
         Returns:
             校验通过的Pydantic模型实例
@@ -103,7 +109,8 @@ class BaseAgent:
             SchemaValidationError: 三层兜底均失败时抛出
         """
         raw_output = await self.generate(
-            user_prompt, tier=tier, temperature=temperature, max_tokens=max_tokens
+            user_prompt, tier=tier, temperature=temperature, max_tokens=max_tokens,
+            history=history,
         )
 
         result = await self._validator.validate(raw_output, model_class, schema_hint)
