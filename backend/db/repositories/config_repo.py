@@ -1,0 +1,47 @@
+"""系统配置 Repository
+
+操作 system_config 表，存储α值等全局参数。
+"""
+
+import json
+from typing import Any
+
+from backend.db.database import query_one, execute_sql
+
+
+def get_config(key: str, default: Any = None) -> Any:
+    """获取配置值（JSON解析）"""
+    row = query_one("SELECT value FROM system_config WHERE key = ?", (key,))
+    if row:
+        return json.loads(row["value"])
+    return default
+
+
+def set_config(key: str, value: Any):
+    """设置配置值（JSON序列化）"""
+    execute_sql(
+        "INSERT INTO system_config (key, value, updated_at) "
+        "VALUES (?, ?, CURRENT_TIMESTAMP) "
+        "ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP",
+        (key, json.dumps(value, ensure_ascii=False), json.dumps(value, ensure_ascii=False)),
+    )
+
+
+def get_alpha() -> float:
+    """获取当前α值（调度员遴选权重）"""
+    return get_config("alpha", 0.9)
+
+
+def set_alpha(alpha: float):
+    """更新α值"""
+    set_config("alpha", alpha)
+
+
+def get_review_weights() -> dict:
+    """获取审核团队权重配置"""
+    return get_config("review_weights", {"w1": 0.35, "w2": 0.35, "w3": 0.30})
+
+
+def get_ema_smooth() -> float:
+    """获取EMA平滑系数"""
+    return get_config("ema_smooth", 0.8)

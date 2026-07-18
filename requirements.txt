@@ -3,25 +3,36 @@
 # 安装方式: pip install -r requirements.txt
 # ============================================================
 
-# --- LLM 调用 ---
-openai>=1.0.0          # 兼容 OpenAI/DeepSeek/Qwen 等多API的通用客户端
+# --- Web框架 ---
+fastapi>=0.110.0          # 异步Web框架，适合多LLM调用编排
+uvicorn[standard]>=0.29.0 # ASGI服务器
+websockets>=12.0          # WebSocket实时状态推送
+python-multipart>=0.0.9   # 表单解析
 
-# --- Agent编排（可选，初期可直接手写调度逻辑） ---
-# langgraph>=0.2.0     # 多Agent状态图编排（P2阶段再启用）
+# --- LLM调用 ---
+openai>=1.30.0            # OpenAI兼容客户端（GPT-4o / DeepSeek / Qwen等）
 
-# --- 向量知识库 ---
-chromadb>=0.5.0        # 向量数据库（轻量，零配置）
-sentence-transformers>=2.2.0  # 中文文本向量化
+# --- 数据校验 ---
+pydantic>=2.7.0           # 数据模型校验
+pydantic-settings>=2.2.0  # 环境变量配置管理
 
-# --- 文档处理 ---
-pypdf>=4.0.0           # PDF解析
-markdown>=3.5.0        # Markdown解析
-beautifulsoup4>=4.12.0 # HTML解析（扒网页文档用）
+# --- 向量知识库（知识库团队使用，后端仅需接口） ---
+# chromadb>=0.5.0         # 向量数据库
+# sentence-transformers>=2.2.0
 
-# --- 前端 ---
-streamlit>=1.30.0      # Web界面
+# --- 数据库 ---
+# sqlite3为Python内置，无需安装
 
 # --- 工具 ---
-python-dotenv>=1.0.0   # 读取.env配置文件
-pydantic>=2.0.0        # 数据校验（Agent输入输出结构化）
-loguru>=0.7.0          # 日志（比print好用，便于调试Agent链路）
+python-dotenv>=1.0.0      # 读取.env配置文件
+loguru>=0.7.0             # 日志（比print好用，便于调试Agent链路）
+httpx>=0.27.0             # 异步HTTP客户端
+
+# --- 测试 ---
+pytest>=8.0.0             # 单元测试框架
+pytest-asyncio>=0.23.0    # 异步测试支持
+
+# --- 文档处理（知识库构建用） ---
+# pypdf>=4.0.0            # PDF解析
+# markdown>=3.5.0         # Markdown解析
+# beautifulsoup4>=4.12.0  # HTML解析

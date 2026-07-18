@@ -1,10 +1,23 @@
 __pycache__/
 *.pyc
 venv/
+.venv/
 .env
 .vscode/
 .idea/
 *.log
-chroma_db/
+logs/
+
+# 数据文件
+data/*.db
+data/chroma_db/
+data/*.sqlite3
+
+# 测试
+.pytest_cache/
+htmlcov/
+.coverage
+
+# 系统
 .DS_Store
 Thumbs.db
