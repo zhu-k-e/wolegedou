@@ -48,8 +48,8 @@ class JudgeFact(BaseAgent):
             "   - 事实准确率≥90%但有轻微表述问题 → revise\n"
             "   - 事实准确率80%-90% → low_confidence_passed\n"
             "   - 否则 → failed\n\n"
-            "【反向怀疑】若knowledge_refs≥5条 / code_example≥20行 / reasoning_steps≥8步，"
-            "启用严格审查（每条必须100%可溯源）\n\n"
+            "【反向怀疑】系统会自动检测输出复杂度并在触发时注入"
+            "「严格审查模式」指令。收到该指令时，每条必须100%可溯源。\n\n"
             "输出JSON: {\"verdict\": \"passed/revise/low_confidence_passed/failed\", "
             "\"confidence\": 0.0-1.0, \"issues\": [], \"verification_coverage\": 0.0-1.0}"
         )
@@ -106,10 +106,44 @@ class JudgePanel:
       - 裁判团只看到：聚焦输出JSON + 学情画像 + 知识库检索接口
     """
 
+    # 反向怀疑触发阈值（方案书 4.4.3 节）
+    _RS_REFS_THRESHOLD = 5
+    _RS_CODE_LINES_THRESHOLD = 20
+    _RS_STEPS_THRESHOLD = 8
+
     def __init__(self, **kwargs):
         self.judge_fact = JudgeFact(**kwargs)
         self.judge_logic = JudgeLogic(**kwargs)
         self.judge_applicability = JudgeApplicability(**kwargs)
+
+    def _detect_reverse_suspicion(self, focused: FocusedOutput) -> bool:
+        """反向怀疑检测（方案书 4.4.3 节）
+
+        被动触发式：当聚焦输出内容复杂度过高时，启用严格审查。
+        触发条件（任一满足）：
+          - knowledge_refs ≥ 5条
+          - code_example ≥ 20行
+          - reasoning_steps ≥ 8步
+
+        Returns:
+            True 表示触发严格审查模式
+        """
+        refs_count = len(focused.knowledge_refs)
+        code_lines = len(focused.code_example.splitlines()) if focused.code_example else 0
+        steps_count = len(focused.reasoning_steps)
+
+        triggered = (
+            refs_count >= self._RS_REFS_THRESHOLD
+            or code_lines >= self._RS_CODE_LINES_THRESHOLD
+            or steps_count >= self._RS_STEPS_THRESHOLD
+        )
+        if triggered:
+            logger.info(
+                f"反向怀疑触发: refs={refs_count}(阈值{self._RS_REFS_THRESHOLD}), "
+                f"code_lines={code_lines}(阈值{self._RS_CODE_LINES_THRESHOLD}), "
+                f"steps={steps_count}(阈值{self._RS_STEPS_THRESHOLD})"
+            )
+        return triggered
 
     async def judge(
         self,
@@ -128,11 +162,14 @@ class JudgePanel:
         """
         import asyncio
 
+        # === 反向怀疑检测（方案书 4.4.3 节） ===
+        strict_mode = self._detect_reverse_suspicion(focused_output)
+
         # === [REVIEWING] 三人独立审查（并行） ===
         judges_tasks = [
-            self._judge_single(self.judge_fact, focused_output, profile),
-            self._judge_single(self.judge_logic, focused_output, profile),
-            self._judge_single(self.judge_applicability, focused_output, profile),
+            self._judge_single(self.judge_fact, focused_output, profile, strict_mode),
+            self._judge_single(self.judge_logic, focused_output, profile, strict_mode),
+            self._judge_single(self.judge_applicability, focused_output, profile, strict_mode),
         ]
         judge_results = await asyncio.gather(*judges_tasks)
         judges = list(judge_results)
@@ -164,6 +201,13 @@ class JudgePanel:
         verified_count = sum(1 for t in traceability if t.verification_status == VerificationStatus.VERIFIED)
         overall_rate = verified_count / len(traceability) if traceability else 0.0
 
+        # 严格模式下，验证率未达100%则降级（方案书 4.4.3 节）
+        if strict_mode and overall_rate < 1.0 and verdict_value == Verdict.PASSED:
+            logger.info(
+                f"严格审查: 验证率{overall_rate:.0%}<100%, 降级为LOW_CONFIDENCE_PASSED"
+            )
+            verdict_value = Verdict.LOW_CONFIDENCE_PASSED
+
         return JudgeVerdict(
             verdict=verdict_value,
             judges=judges,
@@ -173,12 +217,32 @@ class JudgePanel:
         )
 
     async def _judge_single(
-        self, judge: BaseAgent, focused: FocusedOutput, profile: StudentProfile
+        self,
+        judge: BaseAgent,
+        focused: FocusedOutput,
+        profile: StudentProfile,
+        strict_mode: bool = False,
     ) -> JudgeOpinion:
-        """单个裁判独立审查"""
+        """单个裁判独立审查
+
+        Args:
+            strict_mode: 反向怀疑触发的严格审查模式（方案书 4.4.3 节）
+        """
+        strict_instruction = ""
+        if strict_mode:
+            strict_instruction = (
+                "\n\n【严格审查模式已触发】该输出内容复杂度较高，"
+                "请提高审查标准：\n"
+                "1. 每条knowledge_refs必须100%可溯源验证，不可有未验证条目\n"
+                "2. 代码必须检查语法正确性、逻辑完整性和边界情况\n"
+                "3. 推理链不允许任何跳跃，每步必须有充分依据\n"
+                "4. 默认通过阈值从90%提高到95%"
+            )
+
         user_prompt = (
             f"聚焦输出（待审查）：\n{focused.model_dump_json(indent=2)}\n\n"
             f"学情画像：\n{profile.model_dump_json(indent=2)}"
+            f"{strict_instruction}"
         )
 
         raw = await judge.generate(user_prompt, tier=ModelTier.HIGH, temperature=0.0)

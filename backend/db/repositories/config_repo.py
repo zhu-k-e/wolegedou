@@ -58,3 +58,16 @@ def get_importance_snapshot() -> Optional[dict]:
 def set_importance_snapshot(snapshot: dict):
     """更新importance_score快照"""
     set_config("importance_snapshot", snapshot)
+
+
+def get_stable_rounds() -> int:
+    """获取连续稳定的轮数（用于早停判断）
+
+    对应方案书 2.4.4 节：连续2轮波动<0.05才触发早停
+    """
+    return get_config("stable_rounds", 0)
+
+
+def set_stable_rounds(rounds: int):
+    """更新连续稳定轮数"""
+    set_config("stable_rounds", rounds)

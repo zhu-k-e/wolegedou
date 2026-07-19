@@ -197,7 +197,7 @@ class Matcher:
         # 按综合权重排序，取Top-2
         scored_agents.sort(key=lambda x: x["composite_score"], reverse=True)
 
-        # P1-3: 早停判断 — importance_score波动<0.05时只选Top-1
+        # P1-3: 早停判断 — 连续2轮importance_score波动<0.05时只选Top-1（方案书2.4.4）
         early_stop = False
         if last_snapshot and current_snapshot:
             all_stable = True
@@ -206,11 +206,22 @@ class Matcher:
                 if abs(score - last_score) >= 0.05:
                     all_stable = False
                     break
+
+            # 连续2轮稳定才触发早停（避免单次巧合误判）
+            stable_rounds = config_repo.get_stable_rounds()
             if all_stable:
+                stable_rounds += 1
+            else:
+                stable_rounds = 0
+
+            if stable_rounds >= 2:
                 early_stop = True
                 logger.info(
-                    f"早停触发: domain={domain}, importance_score波动<0.05，只选Top-1候选"
+                    f"早停触发: domain={domain}, 连续{stable_rounds}轮"
+                    f"importance_score波动<0.05，只选Top-1候选"
                 )
+
+            config_repo.set_stable_rounds(stable_rounds)
 
         # 核心原则：每段固定2个候选Agent（早停时只选1个）
         # 即便只有1个"最匹配"的Agent，也必须从次匹配Agent中选一个补上

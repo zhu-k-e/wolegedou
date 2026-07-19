@@ -29,7 +29,7 @@ from backend.schemas.student_profile import StudentProfile, IntentType
 from backend.schemas.candidate_output import CandidateOutput
 from backend.schemas.review_feedback import ReviewFeedback
 from backend.schemas.focused_output import FocusedOutput
-from backend.schemas.judge_verdict import JudgeVerdict, Verdict
+from backend.schemas.judge_verdict import JudgeVerdict, Verdict, JudgeOpinion
 from backend.schemas.resource_package import ResourcePackage
 from backend.services.ws_manager import ws_manager
 from backend.services.memory_service import get_memory_service
@@ -52,6 +52,8 @@ class TaskContext:
     focused_outputs: list[FocusedOutput] = field(default_factory=list)
     judge_verdict: Optional[JudgeVerdict] = None
     resource_package: Optional[ResourcePackage] = None
+    # P0-1: 多段合并后的聚焦输出（供FORMATTING和延伸路径使用）
+    merged_focused_output: Optional[FocusedOutput] = None
 
     # FSM状态
     current_state: FSMState = FSMState.IDLE
@@ -365,11 +367,11 @@ class Orchestrator:
             )
 
             # 单候选（早停）场景：没有落选候选，辩论环节跳过
+            loser_output = None
             if loser_candidates_list:
                 loser_output = next(
                     co for co in ctx.candidate_outputs[i] if co.agent_id == loser_candidates_list[0].agent_id
                 )
-                ctx.losing_candidates.append(loser_output)
             else:
                 logger.info(f"段{review.seg_id}只有1个候选（早停），跳过落选候选记录")
 
@@ -389,34 +391,64 @@ class Orchestrator:
             ctx.winning_candidates.append(winner_output)
             ctx.losing_candidates.append(loser_output)
 
+        # P0-1: 计算合并聚焦输出（供FORMATTING和延伸路径使用）
+        if len(ctx.focused_outputs) == 1:
+            ctx.merged_focused_output = ctx.focused_outputs[0]
+        else:
+            ctx.merged_focused_output = self._merge_focused_outputs(ctx.focused_outputs)
+            logger.info(f"多段聚焦输出合并: {len(ctx.focused_outputs)}段 → 1份")
+
         await ws_manager.push_state(
             ctx.task_id, FSMState.FOCUSING.value,
             {"focused_count": len(ctx.focused_outputs)},
         )
 
     async def _do_judging(self, ctx: TaskContext) -> JudgeVerdict:
-        """JUDGING: 裁判团3人并行审查 + 分歧解决 + 候选辩论"""
+        """JUDGING: 裁判团3人并行审查 + 分歧解决 + 候选辩论
+
+        多段场景：各段独立审查（每段3名裁判），最终合并裁决。
+        对应方案书§4.4 + §3.4.2/3.4.3多段处理。
+        """
         await ws_manager.push_state(ctx.task_id, FSMState.JUDGING.value)
 
-        # 合并多段聚焦输出为一份（简化：取第一段）
-        focused = ctx.focused_outputs[0] if ctx.focused_outputs else None
-        if not focused:
+        if not ctx.focused_outputs:
             raise OrchestratorError("无聚焦输出可供裁判")
 
-        # 裁判团审查
-        ctx.judge_verdict = await self.judge_panel.judge(
-            focused_output=focused,
-            profile=ctx.profile,
-            question=ctx.question,
-            winning_candidate=ctx.winning_candidates[0] if ctx.winning_candidates else None,
-            losing_candidate=ctx.losing_candidates[0] if ctx.losing_candidates else None,
-            losing_agent=DomainAgent(ctx.losing_candidates[0].agent_id) if ctx.losing_candidates else None,
-            winning_agent=ctx.winning_agents[0] if ctx.winning_agents else None,
-        )
+        # 各段并行裁判（每段3名裁判独立审查）
+        judge_tasks = []
+        for i, focused in enumerate(ctx.focused_outputs):
+            winning_candidate = ctx.winning_candidates[i] if i < len(ctx.winning_candidates) else None
+            losing_candidate = ctx.losing_candidates[i] if i < len(ctx.losing_candidates) else None
+            winning_agent = ctx.winning_agents[i] if i < len(ctx.winning_agents) else None
+            losing_agent = DomainAgent(losing_candidate.agent_id) if losing_candidate else None
+
+            task = self.judge_panel.judge(
+                focused_output=focused,
+                profile=ctx.profile,
+                question=ctx.question,
+                winning_candidate=winning_candidate,
+                losing_candidate=losing_candidate,
+                losing_agent=losing_agent,
+                winning_agent=winning_agent,
+            )
+            judge_tasks.append(task)
+
+        segment_verdicts = await asyncio.gather(*judge_tasks)
+
+        # 合并多段裁决
+        if len(segment_verdicts) == 1:
+            ctx.judge_verdict = segment_verdicts[0]
+        else:
+            ctx.judge_verdict = self._merge_judge_verdicts(list(segment_verdicts))
+            logger.info(
+                f"多段裁判合并: {len(segment_verdicts)}段, "
+                f"段裁决={[v.verdict.value for v in segment_verdicts]}, "
+                f"整体裁决={ctx.judge_verdict.verdict.value}"
+            )
 
         await ws_manager.push_state(
             ctx.task_id, FSMState.JUDGING.value,
-            {"verdict": ctx.judge_verdict.verdict.value},
+            {"verdict": ctx.judge_verdict.verdict.value, "segments": len(segment_verdicts)},
         )
 
         return ctx.judge_verdict
@@ -457,11 +489,20 @@ class Orchestrator:
             )
             ctx.focused_outputs[i] = focused
 
+        # P0-1: 重新合并多段聚焦输出
+        if len(ctx.focused_outputs) == 1:
+            ctx.merged_focused_output = ctx.focused_outputs[0]
+        else:
+            ctx.merged_focused_output = self._merge_focused_outputs(ctx.focused_outputs)
+
     async def _do_formatting(self, ctx: TaskContext):
-        """FORMATTING: 资源生成Agent按条件生成3种形态"""
+        """FORMATTING: 资源生成Agent按条件生成3种形态
+
+        多段场景：使用合并后的聚焦输出统一生成资源包。
+        """
         await ws_manager.push_state(ctx.task_id, FSMState.FORMATTING.value)
 
-        focused = ctx.focused_outputs[0] if ctx.focused_outputs else None
+        focused = ctx.merged_focused_output or (ctx.focused_outputs[0] if ctx.focused_outputs else None)
         if not focused:
             raise OrchestratorError("无聚焦输出可供资源生成")
 
@@ -567,11 +608,11 @@ class Orchestrator:
         await ws_manager.push_state(task_id, FSMState.REDIMENSION.value)
 
         ctx = self._task_contexts.get(task_id)
-        if not ctx or not ctx.focused_outputs or not ctx.profile:
+        if not ctx or not ctx.merged_focused_output or not ctx.profile:
             logger.warning(f"降维解释: task={task_id} 上下文不存在，跳过LLM调用")
             return await self._do_heuristic_followup(task_id, event_data)
 
-        focused = ctx.focused_outputs[0]
+        focused = ctx.merged_focused_output
         accuracy = event_data.get("accuracy", 0.5)
 
         # 调用资源生成Agent降维解释（返回完整资源包：讲义+实操+测试题）
@@ -597,11 +638,11 @@ class Orchestrator:
         await ws_manager.push_state(task_id, FSMState.ADVANCE.value)
 
         ctx = self._task_contexts.get(task_id)
-        if not ctx or not ctx.focused_outputs or not ctx.profile:
+        if not ctx or not ctx.merged_focused_output or not ctx.profile:
             logger.warning(f"进阶挑战: task={task_id} 上下文不存在，跳过LLM调用")
             return await self._do_heuristic_followup(task_id, event_data)
 
-        focused = ctx.focused_outputs[0]
+        focused = ctx.merged_focused_output
 
         # 调用资源生成Agent进阶挑战
         advance_question = await self.resource_agent.generate_advance_challenge(
@@ -626,11 +667,11 @@ class Orchestrator:
         await ws_manager.push_state(task_id, FSMState.RECHECK.value)
 
         ctx = self._task_contexts.get(task_id)
-        if not ctx or not ctx.focused_outputs:
+        if not ctx or not ctx.merged_focused_output:
             logger.warning(f"审核复检: task={task_id} 上下文不存在，跳过LLM调用")
             return await self._do_heuristic_followup(task_id, event_data)
 
-        focused = ctx.focused_outputs[0]
+        focused = ctx.merged_focused_output
         feedback = event_data.get("feedback", "")
 
         # 调用裁判团复检
@@ -658,11 +699,11 @@ class Orchestrator:
         await ws_manager.push_state(task_id, FSMState.HEURISTIC_FOLLOWUP.value)
 
         ctx = self._task_contexts.get(task_id)
-        if not ctx or not ctx.focused_outputs or not ctx.profile:
+        if not ctx or not ctx.merged_focused_output or not ctx.profile:
             logger.warning(f"启发式追问: task={task_id} 上下文不存在，跳过LLM调用")
             return {"action": "heuristic_followup", "followup_questions": []}
 
-        focused = ctx.focused_outputs[0]
+        focused = ctx.merged_focused_output
         recent_content = focused.model_dump_json(indent=2)
 
         # 调用学情诊断Agent生成追问
@@ -682,6 +723,121 @@ class Orchestrator:
     # ============================================================
     # 辅助方法
     # ============================================================
+
+    def _merge_focused_outputs(self, outputs: list[FocusedOutput]) -> FocusedOutput:
+        """合并多段聚焦输出为一份
+
+        对应方案书§3.4.2/3.4.3：跨段一致性审查后各段最优拼接。
+        各段内容按段标注拼接，保留完整推理链和知识引用。
+        """
+        # 单段直接返回（无需标注）
+        if len(outputs) == 1:
+            return outputs[0]
+
+        # 合并结论（按段标注）
+        conclusions = [
+            f"[段{i+1}] {o.conclusion}" for i, o in enumerate(outputs) if o.conclusion
+        ]
+        merged_conclusion = "\n".join(conclusions)
+
+        # 合并推理步骤（按段标注分隔）
+        merged_steps = []
+        for i, o in enumerate(outputs):
+            if o.reasoning_steps:
+                merged_steps.append(f"--- 段{i+1} ---")
+                merged_steps.extend(o.reasoning_steps)
+
+        # 合并知识引用（直接拼接）
+        merged_refs = []
+        for o in outputs:
+            merged_refs.extend(o.knowledge_refs)
+
+        # 合并适用条件（按段标注）
+        conditions = [
+            f"[段{i+1}] {o.applicable_conditions}"
+            for i, o in enumerate(outputs) if o.applicable_conditions
+        ]
+        merged_conditions = "\n".join(conditions) if conditions else ""
+
+        # 合并代码示例（直接拼接）
+        code_examples = [o.code_example for o in outputs if o.code_example]
+        merged_code = "\n\n".join(code_examples) if code_examples else None
+
+        # 合并难度说明（按段标注）
+        difficulty_notes = [
+            f"[段{i+1}] {o.difficulty_note}"
+            for i, o in enumerate(outputs) if o.difficulty_note
+        ]
+        merged_difficulty = "\n".join(difficulty_notes) if difficulty_notes else None
+
+        return FocusedOutput(
+            conclusion=merged_conclusion,
+            reasoning_steps=merged_steps,
+            knowledge_refs=merged_refs,
+            applicable_conditions=merged_conditions,
+            code_example=merged_code,
+            difficulty_note=merged_difficulty,
+        )
+
+    def _merge_judge_verdicts(self, verdicts: list[JudgeVerdict]) -> JudgeVerdict:
+        """合并多段裁判裁决
+
+        对应方案书§3.4.2/3.4.3：各段独立裁判后合并为整体裁决。
+
+        合并规则：
+          - 整体裁决取最严格结果（FAILED > REVISE > LOW_CONFIDENCE_PASSED > PASSED）
+          - 裁判意见按段标注合并
+          - 分歧解决记录取第一个非空（多段分歧时记录告警）
+          - 溯源标注合并
+          - 验证率取平均
+        """
+        verdict_priority = {
+            Verdict.FAILED: 3,
+            Verdict.REVISE: 2,
+            Verdict.LOW_CONFIDENCE_PASSED: 1,
+            Verdict.PASSED: 0,
+        }
+
+        # 取最严格的裁决
+        overall_verdict = max(
+            verdicts, key=lambda v: verdict_priority.get(v.verdict, 0)
+        ).verdict
+
+        # 合并裁判意见（按段标注）
+        merged_judges = []
+        for i, v in enumerate(verdicts):
+            for judge in v.judges:
+                merged_judges.append(JudgeOpinion(
+                    role=f"[段{i+1}] {judge.role}",
+                    judgment=judge.judgment,
+                    evidence=judge.evidence,
+                    confidence=judge.confidence,
+                ))
+
+        # 合并分歧解决记录
+        dissents = [v.dissent_resolution for v in verdicts if v.dissent_resolution]
+        merged_dissent = dissents[0] if dissents else None
+        if len(dissents) > 1:
+            logger.warning(f"多段分歧: {len(dissents)}个段出现2:1分歧")
+
+        # 合并溯源标注
+        merged_traceability = []
+        for v in verdicts:
+            merged_traceability.extend(v.traceability)
+
+        # 平均验证率
+        avg_rate = (
+            sum(v.overall_verification_rate for v in verdicts) / len(verdicts)
+            if verdicts else 0.0
+        )
+
+        return JudgeVerdict(
+            verdict=overall_verdict,
+            judges=merged_judges,
+            dissent_resolution=merged_dissent,
+            traceability=merged_traceability,
+            overall_verification_rate=avg_rate,
+        )
 
     async def _transition(self, ctx: TaskContext, new_state: FSMState):
         """状态转移（带合法性校验）"""
