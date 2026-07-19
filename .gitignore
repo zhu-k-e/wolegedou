@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+.vscode/
+.idea/
+*.log
+logs/
+
+# 数据文件
+data/*.db
+data/chroma_db/
+data/*.sqlite3
+
+# 知识库预计算向量数据（派生产物，从网盘获取，不入 Git）
+# vectors.npy 140MB 超过 GitHub 单文件 100MB 限制
+data/numpy_kb/
+data/raw_docs/
+*.npy
+
+# 测试
+.pytest_cache/
+htmlcov/
+.coverage
+
+# 系统
+.DS_Store
+Thumbs.db
