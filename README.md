@@ -91,8 +91,14 @@ wolegedou/
 │   │   ├── llm_client.py           # LLM 客户端（分层模型调用）
 │   │   ├── json_validator.py       # JSON 三层兜底校验器
 │   │   ├── memory_service.py       # 贡献记忆服务（EMA / 淘汰 / 反馈）
-│   │   ├── knowledge_base.py       # 知识库接口（RAG 检索，等队友文档接入）
-│   │   └── ws_manager.py           # WebSocket 连接管理
+│   │   ├── knowledge_base.py       # 知识库接口契约（KnowledgeBaseInterface + RetrievalResult）
+│   │   ├── ws_manager.py           # WebSocket 连接管理
+│   │   └── rag/                    # RAG 检索实现
+│   │       ├── embedding_service.py    # bge-m3 嵌入服务（懒加载单例，双后端）
+│   │       ├── document_loader.py      # MD/TXT/PDF 文档加载与切分
+│   │       ├── chroma_knowledge_base.py # ChromaDB 后端（实现 KnowledgeBaseInterface）
+│   │       ├── numpy_knowledge_base.py  # Numpy 后端（加载预计算向量，免运行时向量化）
+│   │       └── kb_manager.py           # 知识库初始化 / 降级 / 导入 / 健康检查
 │   │
 │   ├── db/                         # 数据库层
 │   │   ├── database.py             # SQLite 连接管理
@@ -108,8 +114,13 @@ wolegedou/
 │       ├── test_json_validator.py  # JSON 三层兜底测试
 │       └── test_schemas.py         # Schema 校验测试
 │
-├── data/                           # 运行数据
-│   └── wolegedou.db                # SQLite 数据库（自动创建）
+├── data/                           # 运行数据（不入 Git，见 .gitignore）
+│   ├── wolegedou.db                # SQLite 数据库（自动创建）
+│   └── numpy_kb/                   # 预计算向量数据（从网盘下载，见「知识库数据部署」）
+│       ├── vectors.npy             # (34154, 1024) float32，已 L2 归一化
+│       ├── documents.json          # 34154 条文档原文
+│       ├── metadatas.json          # 元数据（source/applicable_agents/section_path 等）
+│       └── ids.json                # chunk id 列表
 │
 └── docs/                           # 比赛方案文档
     ├── proposal.md                 # 方案书 v7.0 终版
@@ -157,7 +168,44 @@ OPENAI_MINI_MODEL=qwen-turbo
 
 > **换模型不用改代码**：代码用 OpenAI 兼容协议，只要服务商支持 `/v1/chat/completions` 接口，改 `.env` 即可切换。
 
-### 3. 启动服务
+### 3. 部署知识库数据（必做）
+
+知识库团队已提供**预计算好的向量数据**（bge-m3，1024 维，34154 个 chunk），覆盖 10 个 AI 培训领域分类。数据**不入 Git**（`vectors.npy` 140MB 超过 GitHub 单文件限制），从网盘下载后放到本地。
+
+**下载地址**：见团队群公告 / 网盘链接（联系知识库团队获取）
+
+**放置位置**：`data/numpy_kb/`，需包含 4 个文件：
+
+| 文件 | 大小 | 说明 |
+|------|------|------|
+| `vectors.npy` | ~140MB | (34154, 1024) float32，已 L2 归一化 |
+| `documents.json` | ~13MB | 34154 条文档原文 |
+| `metadatas.json` | ~16MB | 元数据（source_doc / applicable_agents / section_path 等） |
+| `ids.json` | ~3MB | chunk id 列表 |
+
+```bash
+# 下载后放置示例
+data/numpy_kb/
+├── vectors.npy
+├── documents.json
+├── metadatas.json
+└── ids.json
+```
+
+**验证部署成功**：
+
+```bash
+# 方式 1：启动后看日志，应出现「NumpyKB 模式」字样
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 方式 2：调用健康检查接口
+curl http://localhost:8000/health
+# 返回的 mode 字段应为 "numpy"，chunk_count 应为 34154
+```
+
+> **说明**：若未部署知识库数据，系统会自动降级为 Stub 模式（返回空检索结果），后端仍可启动，但 RAG 检索功能不可用。详见 `backend/services/rag/kb_manager.py` 的降级策略。
+
+### 4. 启动服务
 
 ```bash
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
@@ -169,7 +217,7 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 - **Swagger 文档**：http://localhost:8000/docs
 - WebSocket：ws://localhost:8000/ws/{task_id}
 
-### 4. 运行测试
+### 5. 运行测试
 
 ```bash
 python -m pytest backend/tests/ -v
@@ -386,13 +434,15 @@ LLM 输出可能格式不规范，系统通过三层兜底确保解析成功：
 - [x] 延伸闭环（降维 / 进阶 / 复检 / 追问）
 - [x] 候选自评估双低触发 RAG 增强
 - [x] 调度早停机制
+- [x] 知识库 RAG 适配器（`NumpyKnowledgeBase` 对接预计算向量数据，34154 chunks，10 分类）
+- [x] 知识库后端自动选择（numpy 优先 / chroma 备选 / stub 降级）
 - [x] FastAPI 后端 + 5 个 API 路由 + WebSocket
 - [x] 单元测试（26 个，全部通过）
 - [x] DeepSeek + 通义千问 API 验证通过
 
 ### 待完成
 
-- [ ] 知识库 RAG 实际文档入库（等知识库团队提供领域文档）
+- [ ] 知识库端到端真实检索验证（bge-m3 模型部署 + 真实 query 测试）
 - [ ] 前端界面（前端团队负责）
 - [ ] 端到端集成测试
 - [ ] 部署上线

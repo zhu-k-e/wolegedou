@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-m3"
     kb_top_k: int = 3
     kb_score_threshold: float = 0.6
+    kb_docs_path: str = "data/raw_docs"           # 领域文档原始目录（队友放的文档）
+    kb_collection_name: str = "wolegedou_kb"       # ChromaDB collection 名
+
+    # numpy 预计算向量知识库（知识库同学直接给向量化产物时用）
+    # auto: 优先 numpy（若数据存在），否则 chroma
+    # numpy: 强制用 numpy 预计算数据（data/kb_numpy_dir）
+    # chroma: 强制用 ChromaDB（走运行时向量化 + 持久化）
+    kb_backend: str = "auto"
+    kb_numpy_dir: str = "data/numpy_kb"            # numpy 四件套目录（vectors.npy 等）
 
     # --- 服务 ---
     host: str = "0.0.0.0"
