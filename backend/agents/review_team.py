@@ -77,7 +77,9 @@ class Verifier(BaseAgent):
         )
 
         raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.0)
-        data = json.loads(raw)
+        data = await self.parse_json_safe(raw)
+        if data is None:
+            data = {"fact_accuracy": 0.5, "verified_count": 0, "contradiction_count": 0, "unverified_items": [], "contradiction_items": []}
 
         score = data.get("fact_accuracy", 0.5)
         issues = [
@@ -136,7 +138,9 @@ class Skeptic(BaseAgent):
         user_prompt = f"AI输出：\n{candidate.answer.model_dump_json(indent=2)}"
 
         raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.0)
-        data = json.loads(raw)
+        data = await self.parse_json_safe(raw)
+        if data is None:
+            data = {"logic_completeness": 0.5, "checklist_results": [], "failed_items": []}
 
         # 按方案书 §4.2.3：从 checklist_results 自行计算总分，不信任 LLM 自报的 logic_completeness
         checklist = data.get("checklist_results", [])
@@ -188,7 +192,9 @@ class Evaluator(BaseAgent):
         )
 
         raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.0)
-        data = json.loads(raw)
+        data = await self.parse_json_safe(raw)
+        if data is None:
+            data = {"pedagogical_fit": 0.5, "dimension_scores": {}, "mismatch_details": []}
 
         score = data.get("pedagogical_fit", 0.5)
         issues = [
@@ -231,10 +237,12 @@ class ReviewTeam:
         candidate_reviews = []
 
         for candidate in candidates:
-            # 3人并行评分
-            v_score, v_issues = await self.verifier.review(candidate, profile)
-            s_score, s_issues = await self.skeptic.review(candidate, profile)
-            e_score, e_issues = await self.evaluator.review(candidate, profile)
+            # 3人并行评分（方案书§8.4.2优化1：asyncio.gather节省2×3秒）
+            (v_score, v_issues), (s_score, s_issues), (e_score, e_issues) = await asyncio.gather(
+                self.verifier.review(candidate, profile),
+                self.skeptic.review(candidate, profile),
+                self.evaluator.review(candidate, profile),
+            )
 
             # 综合得分
             composite = v_score * w1 + s_score * w2 + e_score * w3
@@ -311,16 +319,15 @@ class ReviewTeam:
 
         raw = await self.verifier.generate(user_prompt, tier=ModelTier.MID, temperature=0.0)
 
-        try:
-            data = json.loads(raw)
-            return [
-                IssueFound(
-                    reviewer="CrossSegment",
-                    severity=issue.get("severity", "medium"),
-                    location=issue.get("location", ""),
-                    description=issue.get("description", ""),
-                )
-                for issue in data.get("issues", [])
-            ]
-        except json.JSONDecodeError:
+        data = await self.verifier.parse_json_safe(raw)
+        if data is None:
             return []
+        return [
+            IssueFound(
+                reviewer="CrossSegment",
+                severity=issue.get("severity", "medium"),
+                location=issue.get("location", ""),
+                description=issue.get("description", ""),
+            )
+            for issue in data.get("issues", [])
+        ]

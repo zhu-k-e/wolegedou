@@ -123,9 +123,31 @@ class BaseAgent:
 
         return result
 
-    async def search_knowledge(self, query: str, top_k: int = 3) -> list:
-        """搜索知识库（便捷方法）"""
-        return await self._kb.search(query, top_k=top_k)
+    async def parse_json_safe(self, raw: str, schema_hint: Optional[str] = None) -> Optional[dict]:
+        """三层兜底解析JSON（返回dict，不绑定Pydantic模型）
+
+        用于输出结构简单、不值得定义Pydantic模型的场景。
+        复用JSONValidator的三层兜底机制。
+        """
+        return await self._validator.parse_json_safe(raw, schema_hint)
+
+    async def search_knowledge(
+        self,
+        query: str,
+        top_k: int = 3,
+        filter_agent: Optional[str] = None,
+    ) -> list:
+        """搜索知识库（便捷方法）
+
+        对应方案书 6.6 节 Agent RAG 增强：每个 Agent 只检索自己分类下的 chunk。
+
+        Args:
+            query: 检索查询
+            top_k: 返回条数
+            filter_agent: Agent名称，用于按分类过滤检索
+                （如 "LLM基础Agent"，传 None 时检索全部 chunk）
+        """
+        return await self._kb.search(query, top_k=top_k, filter_agent=filter_agent)
 
     def __repr__(self):
         return f"<{self.__class__.__name__} id={self.agent_id} name={self.agent_name}>"

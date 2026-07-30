@@ -4,12 +4,26 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+app = FastAPI()
+
+# 异地联调临时放开全部跨域
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 下面是你原有代码不变
 from loguru import logger
 
 from backend.config import get_settings
 from backend.db.init_db import init_database
 from backend.services.rag.kb_manager import init_knowledge_base
-from backend.api.routes import ask, status, feedback, quiz, ws, kb
+from backend.api.routes import ask, status, feedback, quiz, ws, kb, report
 
 
 settings = get_settings()
@@ -54,15 +68,19 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router, prefix="/api", tags=["反馈"])
     app.include_router(quiz.router, prefix="/api", tags=["答题"])
     app.include_router(kb.router, prefix="/api", tags=["知识库"])
+    app.include_router(report.router, prefix="/api", tags=["报告"])
     app.include_router(ws.router, tags=["WebSocket"])
 
     @app.get("/")
     async def root():
-        return {
-            "service": "多智能体协同决策系统",
-            "version": "0.1.0",
-            "docs": "/docs",
-        }
+        return JSONResponse(
+            content={
+                "service": "多智能体协同决策系统",
+                "version": "0.1.0",
+                "docs": "/docs",
+            },
+            media_type="application/json; charset=utf-8",
+        )
 
     @app.get("/health")
     async def health():

@@ -52,6 +52,14 @@ class WSManager:
             "data": data or {},
         }
 
+        # P1-1: 同步更新 status 接口缓存，保证 /api/status/{task_id} 与 WebSocket 状态一致
+        # 延迟导入避免与 orchestrator 的循环依赖
+        try:
+            from backend.api.routes.status import update_task_state
+            update_task_state(task_id, state, data or {})
+        except Exception as e:
+            logger.warning(f"同步 status 缓存失败: {e}")
+
         if task_id not in self._connections:
             logger.debug(f"task_id={task_id} 无WebSocket连接，跳过推送")
             return

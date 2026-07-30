@@ -61,6 +61,52 @@ class JSONValidator:
         logger.warning(f"三层兜底均失败，raw_output前100字符: {raw_output[:100]}")
         return None
 
+    async def parse_json_safe(
+        self,
+        raw_output: str,
+        schema_hint: Optional[str] = None,
+    ) -> Optional[dict]:
+        """三层兜底解析JSON（返回dict，不绑定Pydantic模型）
+
+        用于输出结构简单、不值得定义Pydantic模型的场景
+        （如辩论证据、裁判意见、启发式追问等）。
+        复用三层兜底机制：直接解析 → 正则提取 → LLM修复。
+        """
+        # 第一层：直接解析
+        try:
+            return json.loads(raw_output)
+        except json.JSONDecodeError:
+            pass
+
+        # 第二层：正则提取
+        json_str = self._extract_json_block(raw_output)
+        if json_str is not None:
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
+
+        # 第三层：LLM修复
+        if self._llm is not None:
+            try:
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是一个JSON修复助手。以下文本应该是JSON但格式有误，"
+                            "请修复并输出有效JSON。只输出JSON，不要输出其他内容。"
+                        ),
+                    },
+                    {"role": "user", "content": f"原始输出:\n{raw_output}"},
+                ]
+                repaired = await self._llm.chat_json(messages, tier=ModelTier.MID)
+                return json.loads(repaired)
+            except Exception as e:
+                logger.debug(f"parse_json_safe 第三层修复失败: {e}")
+
+        logger.warning(f"parse_json_safe 三层均失败, raw前100字符: {raw_output[:100]}")
+        return None
+
     # ============================================================
     # 第一层：直接解析
     # ============================================================
@@ -204,5 +250,7 @@ def get_json_validator() -> JSONValidator:
     """获取JSON校验器单例"""
     global _validator
     if _validator is None:
-        _validator = JSONValidator()
+        # 注入LLM客户端，使第三层LLM修复可用
+        from backend.services.llm_client import get_llm_client
+        _validator = JSONValidator(llm_client=get_llm_client())
     return _validator

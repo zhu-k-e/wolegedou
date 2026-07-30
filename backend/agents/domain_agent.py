@@ -132,6 +132,7 @@ class DomainAgent(BaseAgent):
             model_class=CandidateOutput,
             tier=ModelTier.MID,
             temperature=0.7,
+            max_tokens=4096,  # 候选输出含完整答案+代码示例，2048易截断
         )
 
         logger.info(
@@ -224,7 +225,7 @@ class DomainAgent(BaseAgent):
             model_class=FocusedOutput,
             tier=ModelTier.HIGH,  # 聚焦输出用高档模型
             temperature=0.3,
-            max_tokens=2048,
+            max_tokens=4096,  # 聚焦输出含完整答案+代码，2048易截断
             history=history,  # 保持LLM会话上下文
         )
 
@@ -257,12 +258,10 @@ class DomainAgent(BaseAgent):
 
         raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.5)
 
-        import json
-        try:
-            data = json.loads(raw)
-            return [_safe_str(item) for item in data.get("evidence", [])]
-        except json.JSONDecodeError:
+        data = await self.parse_json_safe(raw)
+        if data is None:
             return [raw.strip()]
+        return [_safe_str(item) for item in data.get("evidence", [])]
 
     async def debate_defense(
         self,
@@ -285,9 +284,7 @@ class DomainAgent(BaseAgent):
 
         raw = await self.generate(user_prompt, tier=ModelTier.MID, temperature=0.5)
 
-        import json
-        try:
-            data = json.loads(raw)
-            return [_safe_str(item) for item in data.get("evidence", [])]
-        except json.JSONDecodeError:
+        data = await self.parse_json_safe(raw)
+        if data is None:
             return [raw.strip()]
+        return [_safe_str(item) for item in data.get("evidence", [])]

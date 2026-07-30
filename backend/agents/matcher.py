@@ -62,6 +62,14 @@ class Matcher:
         # === Step 1: 意图裁决 ===
         intent = profile.intent_type
 
+        # 意图兜底：LLM 偶尔对"什么是RAG"这类简短但领域明确的问题过度保守判 clarification
+        # 既然已经识别到 domain_hint（有领域线索），就强制走 generation 直接给学习资源
+        if intent == IntentType.CLARIFICATION and profile.domain_hint:
+            logger.info(
+                f"[意图兜底] LLM判clarification但有domain_hint={profile.domain_hint}，改判generation"
+            )
+            intent = IntentType.GENERATION
+
         if intent == IntentType.CLARIFICATION:
             return DispatchResult(
                 intent=intent,
@@ -81,6 +89,19 @@ class Matcher:
         # === generation路径 ===
         # Step 2: 领域解析
         segments_def = self._resolve_domains(profile)
+
+        # P0-2: 如果领域解析返回空（全low情况），退回clarification
+        if not segments_def and profile.domain_hint:
+            logger.info(
+                f"[DISPATCHING回退] domain_confidence全low，转入clarification路径: "
+                f"hints={profile.domain_hint}"
+            )
+            return DispatchResult(
+                intent=IntentType.CLARIFICATION,
+                segments=[],
+                navigation_roadmap=None,
+                clarification_options=self._generate_clarification_options(profile),
+            )
 
         # Step 3: 候选遴选
         segments = []
@@ -112,18 +133,25 @@ class Matcher:
         """根据domain_hint、domain_confidence和complexity_estimate确定段数和每段领域
 
         对应方案书 2.3.2 节领域解析规则
+
+        P0-2修复：
+          - 全low时返回空列表作为信号，由调用方决定退回clarification
+          - 调用方（matcher.dispatch + orchestrator._do_dispatching）
+            收到空列表后转为clarification路径
         """
         hints = profile.domain_hint
         confidences = profile.domain_confidence
 
-        # 全low → 退回clarification
+        # P0-2: 全low → 返回空列表，由调用方退回clarification
         if hints and all(
             confidences.get(h, ConfidenceLevel.LOW) == ConfidenceLevel.LOW
             for h in hints
         ):
-            logger.warning("所有domain_confidence为low，应退回clarification")
-            # 这里仍返回领域，由调用方判断是否退回
-            # 实际实现中应由画像生成器在intent_type阶段就处理
+            logger.warning(
+                "所有domain_confidence为low，退回clarification: "
+                f"hints={hints}, confidences={confidences}"
+            )
+            return []
 
         # 全链路规划 → 按流程步骤拆段
         if profile.question_type == QuestionType.FULL_PIPELINE:
@@ -257,29 +285,33 @@ class Matcher:
     def _compute_match_score(self, card: dict, domain: str) -> float:
         """计算功能匹配度
 
-        对应方案书 2.4.1 节：
-          primary_function匹配 → 1.0
-          secondary_functions匹配 → 0.7
-          domain_tags匹配 → 0.5
-          否则 → 0
+        对应方案书 2.4.1 节三档评分：
+          primary_function 主领域匹配   → 1.0
+          secondary_functions 次领域匹配 → 0.7
+          domain_tags 弱标签匹配        → 0.5
+          否则                          → 0.0
+
+        实现说明（基于 AGENT_CARDS 结构）：
+          domain_tags[0] 视为 Agent 的主领域（与 primary_function 对应），
+          domain_tags[1:] 视为次领域（Agent 有该领域次要能力，对应 secondary_functions），
+          domain 出现在 secondary_functions 文本中视为弱标签相关。
+        所有分支互斥，按 1.0 → 0.7 → 0.5 顺序短路返回，无死代码。
         """
-        # 注意：domain是domain_hint值（如"RAG"），需要匹配domain_tags
-        if domain in card.get("domain_tags", []):
-            # 进一步判断是primary还是secondary
-            # 通过function_tag间接判断
-            primary_tag = card["primary_function"]
-            perf = agent_repo.get_agent_performance(card["agent_id"], primary_tag)
-            if perf and not perf["is_suspended"]:
-                return 1.0
+        domain_tags = card.get("domain_tags", [])
 
+        # 1. 主领域匹配 → primary_function 档 → 1.0
+        if domain_tags and domain_tags[0] == domain:
+            return 1.0
+
+        # 2. 次领域匹配 → secondary_functions 档 → 0.7
+        if domain in domain_tags[1:]:
+            return 0.7
+
+        # 3. 弱标签匹配：domain 出现在 secondary_functions 文本中 → 0.5
+        domain_lower = domain.lower()
         for sec in card.get("secondary_functions", []):
-            # secondary_functions是功能描述，不是domain_hint
-            # 这里简化：如果domain出现在secondary_functions文本中
-            if domain.lower() in sec.lower():
-                return 0.7
-
-        if domain in card.get("domain_tags", []):
-            return 0.5
+            if domain_lower in sec.lower():
+                return 0.5
 
         return 0.0
 

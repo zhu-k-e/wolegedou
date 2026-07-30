@@ -59,6 +59,10 @@ class AskResponse(BaseModel):
     navigation_roadmap: Optional[str] = None
     clarification_options: Optional[list[str]] = None
     error: Optional[str] = None
+    # P1-7 数据合规：所有响应明确标注 AI 生成内容
+    disclaimer: str = "⚠️ 以上内容由 AI 生成，仅供参考，请以官方文档与权威资料为准。"
+    # P1-6 离线缓存：标识本次响应是否来自 demo_cache
+    from_cache: bool = False
 
 
 class StatusResponse(BaseModel):
@@ -82,3 +86,61 @@ class QuizSubmitResponse(BaseModel):
     action: str = Field(description="redimension / advance / recheck")
     new_resources: Optional[dict] = None
     followup_questions: Optional[list[str]] = None
+
+
+# ============================================================
+# 学情诊断报告（方案书 8.2.2 节可视化报告三组件）
+# ============================================================
+
+class HeatmapNode(BaseModel):
+    """知识盲区热力图节点"""
+    domain: str = Field(description="领域名（如 LLM基础）")
+    agent_name: str = Field(description="关联的 Agent 名")
+    status: str = Field(description="mastered(绿已掌握) / partial(黄部分掌握) / blind(红盲区)")
+    importance_score: float = Field(description="Agent Card 历史评分")
+    interacted: bool = Field(description="学生是否已交互该领域")
+
+
+class KnowledgeHeatmap(BaseModel):
+    """组件1：知识盲区定位热力图"""
+    nodes: list[HeatmapNode]
+    blind_count: int = Field(description="盲区领域数")
+    summary: str = Field(description="汇总建议")
+
+
+class DifficultyMatchPoint(BaseModel):
+    """资源难度匹配曲线数据点"""
+    domain: str = Field(description="知识标签（横轴）")
+    student_level: float = Field(description="学生掌握水平 0-1（蓝线）")
+    resource_difficulty: float = Field(description="资源难度 0-1（红线）")
+    match_status: str = Field(description="matched / too_easy / too_hard")
+
+
+class DifficultyMatchCurve(BaseModel):
+    """组件2：资源难度匹配曲线"""
+    points: list[DifficultyMatchPoint]
+    overall_match_rate: float = Field(description="整体匹配率 0-1")
+
+
+class PathStage(BaseModel):
+    """学习路径阶段节点"""
+    stage: int = Field(description="阶段序号")
+    title: str = Field(description="阶段标题")
+    domains: list[str] = Field(description="涉及领域")
+    estimated_hours: int = Field(description="预计学习时间（小时）")
+    student_status: str = Field(description="mastered / partial / blind / not_reached")
+    recommended: bool = Field(description="是否推荐优先学习（盲区联动）")
+
+
+class LearningPath(BaseModel):
+    """组件3：学习路径规划图"""
+    stages: list[PathStage]
+
+
+class LearningReport(BaseModel):
+    """学情诊断报告（8.2.2 节三组件）"""
+    session_id: str
+    profile_summary: dict = Field(description="画像摘要")
+    knowledge_heatmap: KnowledgeHeatmap
+    difficulty_match: DifficultyMatchCurve
+    learning_path: LearningPath

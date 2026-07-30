@@ -6,6 +6,7 @@
 from typing import Optional
 
 from backend.db.database import query_one, query_all, execute_sql
+from backend.services.compliance import ensure_session
 
 
 # ============================================================
@@ -87,6 +88,8 @@ def save_student_feedback(
     comment: Optional[str] = None,
 ):
     """保存学生反馈"""
+    # 确保会话存在（/feedback 路由可能不经过 /ask，session 可能不存在）
+    ensure_session(session_id)
     execute_sql(
         """
         INSERT INTO student_feedback

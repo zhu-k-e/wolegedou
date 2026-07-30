@@ -74,6 +74,15 @@ def suspend_agent_tag(agent_id: str, function_tag: str):
     )
 
 
+def get_total_task_count() -> int:
+    """获取全系统总任务记录数（所有agent所有function_tag的count之和）
+
+    用于α动态切换判断（方案书§2.4.2：数据积累后自动降α）
+    """
+    row = query_one("SELECT COALESCE(SUM(count), 0) AS total FROM agent_performance")
+    return row["total"] if row else 0
+
+
 def _row_to_card(row) -> dict:
     """将数据库行转换为Agent卡片dict"""
     return {

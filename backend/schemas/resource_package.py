@@ -3,16 +3,16 @@
 对应方案书 6.2.5 节 Schema
 前端统一消费3种形态的个性化学习资源。
 
-3种形态触发逻辑：
+3种形态生成逻辑（resource_agent.py 实现，已放宽触发条件）：
   - lecture: 必选（始终生成）
-  - practice_guide: 条件触发（FocusedOutput含code_example字段时生成）
-  - quiz: 条件触发（question_type∈{概念理解,操作步骤,架构设计}时生成）
+  - practice_guide: 始终生成（含代码→代码实操步骤；无代码→决策检查清单/应用步骤）
+  - quiz: 始终生成（根据question_type自适应题型）
 """
 
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class QuizType(str, Enum):
@@ -63,6 +63,15 @@ class PracticeGuide(BaseModel):
         default_factory=list, description="常见问题排查"
     )
 
+    @field_validator("common_issues", mode="before")
+    @classmethod
+    def _normalize_common_issues(cls, v):
+        """LLM 对无常见问题的场景可能返回 null，normalize 为 []。
+        default_factory 只在字段缺失时生效，显式 null 仍会校验失败。"""
+        if v is None:
+            return []
+        return v
+
 
 class QuizQuestion(BaseModel):
     """单道测试题"""
@@ -74,6 +83,16 @@ class QuizQuestion(BaseModel):
     answer: str
     explanation: str = Field(description="解析，引用知识库依据")
     difficulty: QuizDifficulty
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def _normalize_options(cls, v):
+        """简答题/设计分析题/代码补全题无选项，LLM 合理返回 null。
+        default_factory 只在字段缺失时生效，显式 null 仍会校验失败导致三层兜底全挂、
+        触发降级模式（practice_guide/quiz 全 null）。这里 normalize 为 []。"""
+        if v is None:
+            return []
+        return v
 
 
 class Quiz(BaseModel):

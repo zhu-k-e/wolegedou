@@ -7,6 +7,7 @@ import json
 from typing import Optional
 
 from backend.db.database import query_one, query_all, execute_sql
+from backend.services.compliance import ensure_session
 
 
 def save_profile(
@@ -22,6 +23,8 @@ def save_profile(
     domain_confidence: dict,
 ) -> int:
     """保存学情画像（版本号自增）"""
+    # 确保会话存在（避免外键约束失败 / 孤儿记录）
+    ensure_session(session_id)
     cursor = execute_sql(
         """
         INSERT INTO student_profiles
