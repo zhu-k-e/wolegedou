@@ -1,0 +1,164 @@
+{
+  "meta": {
+    "title": "多Agent辩论裁判协同演示",
+    "description": "挑战杯揭榜挂帅XH-202630 · 防幻觉机制展示",
+    "generated_at": "2026-07-30T21:06:00.189645",
+    "demo_question": "什么是注意力机制（Attention Mechanism）？它在Transformer中的作用是什么？"
+  },
+  "input": {
+    "question": "什么是注意力机制（Attention Mechanism）？它在Transformer中的作用是什么？",
+    "student_profile": {
+      "knowledge_level": "入门",
+      "background": "理科_无编程",
+      "current_goal": "快速上手应用",
+      "domain_hint": "LLM基础"
+    },
+    "focused_output": {
+      "title": "注意力机制基础",
+      "conclusion": "注意力机制（Attention Mechanism）是Transformer架构的核心组件，它允许模型在处理序列数据时动态关注不同位置的信息权重。与RNN按顺序处理不同，注意力机制可以并行计算所有位置之间的相关性，大幅提升训练效率。",
+      "reasoning_steps": [
+        "步骤1：注意力机制的本质是'加权求和'——根据查询(Query)与各个键(Key)的相似度，计算每个值(Value)的权重，然后加权聚合。",
+        "步骤2：在Transformer中，自注意力(Self-Attention)让每个token与其他所有token计算关联度，从而捕捉长距离依赖关系。这与RNN的逐步传递不同，无信息衰减问题。",
+        "步骤3：论文'Attention Is All You Need'(Vaswani et al., 2017)提出的Scaled Dot-Product Attention被原始Transformer采用。后来发展出多头注意力(Multi-Head Attention)，让模型在不同表示子空间学习关联模式。",
+        "步骤4：Transformer的编码器-解码器结构通过交叉注意力(Cross-Attention)对齐输入输出。Google 2017年最早在机器翻译任务上验证了其有效性。",
+        "但Google并未提出注意力机制——注意力机制最早由Bahdanau等人在2014年提出用于机器翻译。"
+      ],
+      "knowledge_refs": [
+        {
+          "source": "论文: Attention Is All You Need (Vaswani et al., 2017)",
+          "content_summary": "Transformer架构使用Scaled Dot-Product Attention，公式为Attention(Q,K,V)=softmax(QK^T/√d_k)V"
+        },
+        {
+          "source": "论文: Neural Machine Translation by Jointly Learning to Align and Translate (Bahdanau et al., 2015)",
+          "content_summary": "首次将注意力机制引入神经机器翻译，解决长句翻译性能下降问题"
+        },
+        {
+          "source": "CS224n Lecture Notes (Stanford)",
+          "content_summary": "注意力机制分为全局注意力和局部注意力，常见变体包括加性注意力、乘性注意力和自注意力"
+        }
+      ],
+      "code_example": "import torch\nimport torch.nn.functional as F\n\ndef scaled_dot_product_attention(Q, K, V):\n    '''Scaled Dot-Product Attention 实现'''\n    d_k = K.size(-1)\n    scores = torch.matmul(Q, K.transpose(-2, -1)) / (d_k ** 0.5)\n    weights = F.softmax(scores, dim=-1)\n    return torch.matmul(weights, V)"
+    }
+  },
+  "reverse_suspicion": {
+    "triggered": false,
+    "refs_count": 3,
+    "code_lines": 9,
+    "steps_count": 5
+  },
+  "judges": {
+    "fact_judge": {
+      "role": "事实审查裁判",
+      "judgment": "fail",
+      "evidence": [
+        "步骤4中'Google 2017年最早在机器翻译任务上验证了其有效性'表述可能产生误解——注意力机制不是Google提出的，是Bahdanau 2014和Luong 2015的工作。Transformer确实是Google提出的，但注意力机制本身不是。",
+        "建议改为：'Transformer由Google在2017年提出，基于Bahdanau等人2014年提出的注意力机制'"
+      ],
+      "confidence": 0.82
+    },
+    "logic_judge": {
+      "role": "逻辑审查裁判",
+      "judgment": "pass",
+      "evidence": [
+        "推理链从概念定义→自注意力→多头注意力→交叉注意力，逻辑递进清晰",
+        "结论与推理步骤一致，无矛盾"
+      ],
+      "confidence": 0.88
+    },
+    "applicability_judge": {
+      "role": "适用性审查裁判",
+      "judgment": "pass",
+      "evidence": [
+        "内容从基础概念讲起，适合'入门'水平学生",
+        "代码示例简洁（仅7行），适合'无编程背景'学生理解",
+        "目标'快速上手应用'对齐较好——不涉及公式推导细节"
+      ],
+      "confidence": 0.85
+    },
+    "vote_summary": {
+      "pass": 2,
+      "fail": 1
+    }
+  },
+  "dissent_resolution": {
+    "minority_judge": "事实审查裁判",
+    "minority_evidence": [
+      "步骤4中'Google 2017年最早在机器翻译任务上验证了其有效性'表述可能产生误解——注意力机制不是Google提出的，是Bahdanau 2014和Luong 2015的工作。Transformer确实是Google提出的，但注意力机制本身不是。",
+      "建议改为：'Transformer由Google在2017年提出，基于Bahdanau等人2014年提出的注意力机制'"
+    ],
+    "majority_response": "rejected",
+    "majority_reasoning": [
+      "步骤4的表述确实可优化，但内容本身是正确的 —— 注意力机制确实是Bahdanau提出，Transformer确实由Google在机器翻译任务上推广。混淆责任在表述不够精确，不影响输出质量。",
+      "总体看，4步推理链完整，实质无事实错误。建议标注为'low_confidence_passed'而非退回修改。"
+    ],
+    "chief_judge_verdict": "revise",
+    "chief_judge_reasoning": "事实审查裁判指出的问题确实存在：步骤4的表述可能被评委解读为'Google提出了注意力机制'。在学术答辩场景下，这个混淆必须修正。建议退回修改步骤4的表述，其他内容通过。"
+  },
+  "candidate_debate": {
+    "challenging_agent": "agent_005 (Agent框架Agent)",
+    "challenge_evidence": [
+      "落选候选(Agent框架Agent): 注意力机制的应用背景更适合在Agent框架中讲解，关注的是'如何利用注意力处理长上下文'而非'注意力原理本身'。入门学生更需要实用性视角。"
+    ],
+    "defending_agent": "agent_001 (LLM基础Agent)",
+    "defense_evidence": [
+      "获胜候选(LLM基础Agent): 入门阶段重要的是建立概念理解，而不是跳入框架应用。先讲'是什么'再讲'怎么用'是教育学的合理顺序。"
+    ]
+  },
+  "verdict": "revise",
+  "traceability": {
+    "statements_count": 8,
+    "verified_count": 8,
+    "verification_rate": 1.0,
+    "traceability_items": [
+      {
+        "statement": "Transformer架构使用Scaled Dot-Product Attention",
+        "source_label": "knowledge_ref_1",
+        "verification_status": "已验证",
+        "source_doc": "Attention Is All You Need"
+      },
+      {
+        "statement": "Bahdanau首次将注意力机制引入机器翻译",
+        "source_label": "knowledge_ref_2",
+        "verification_status": "已验证",
+        "source_doc": "Bahdanau 2015"
+      },
+      {
+        "statement": "注意力分为全局/局部注意力，加性/乘性/自注意力",
+        "source_label": "knowledge_ref_3",
+        "verification_status": "已验证",
+        "source_doc": "CS224n Lecture Notes"
+      },
+      {
+        "statement": "注意力机制是Transformer核心，可并行计算所有位置相关性",
+        "source_label": "conclusion",
+        "verification_status": "已验证",
+        "source_doc": "综合多篇文献"
+      },
+      {
+        "statement": "注意力机制本质是Query-Key-Value的加权求和",
+        "source_label": "reasoning_step_1",
+        "verification_status": "已验证",
+        "source_doc": "综合多篇文献"
+      },
+      {
+        "statement": "自注意力让每个token与其他所有token计算关联度",
+        "source_label": "reasoning_step_2",
+        "verification_status": "已验证",
+        "source_doc": "Attention Is All You Need"
+      },
+      {
+        "statement": "Scaled Dot-Product Attention被原始Transformer采用",
+        "source_label": "reasoning_step_3",
+        "verification_status": "已验证",
+        "source_doc": "Attention Is All You Need"
+      },
+      {
+        "statement": "Transformer通过交叉注意力对齐输入输出",
+        "source_label": "reasoning_step_4",
+        "verification_status": "已验证",
+        "source_doc": "Attention Is All You Need"
+      }
+    ]
+  },
+  "review_unanimous": false
+}

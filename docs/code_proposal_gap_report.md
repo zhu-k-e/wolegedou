@@ -1,251 +1,276 @@
-# 代码与方案书匹配度审查报告
+# 代码与方案书一致性对比报告
 
-> 审查时间: 2026-07-15
-> 方案书版本: v7.0 (proposal.md, ~3500行)
-> 代码版本: 当前 backend/ 目录全部文件 (51个Python文件)
-> 审查范围: 方案书全部11个部分 vs 代码全部模块
+> 对比范围：方案书 v7.0（2026-07-13） vs `backend/` 目录全部 Python 源文件  
+> 对比方法：仅阅读代码和方案书正文，不参考任何历史分析结论  
+> 生成时间：2026-07-28
 
 ---
 
-## 一、总体评估
+## 总体结论
 
-| 维度 | 结果 |
+代码整体实现了方案书的核心机制，**架构对齐度约 85%**。主要差距集中在：
+
+1. **辩论机制未完整实现**——方案书强调的"候选Agent辩论"（落选方质疑+获胜方辩护）缺失
+2. **资源生成的触发性放宽**——方案书三形态有条件触发，代码改为无条件始终生成
+3. **跨段一致性审查**——方案书 4.3 节详细规定，代码中 `review_team.py` 有 `_cross_segment_check()` 桩函数但未实际调用
+4. **裁判团分歧解决状态机**——方案书 4.4.2 节三态状态机（MATCH→EXTEND→BREAK），代码中 `judge_panel.py` 简化处理
+
+以下逐章节详细对比。
+
+---
+
+## 一、调度框架（方案书第2部分）
+
+### 2.2 学情画像 Agent → `profile_agent.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 生成知识水平、背景、当前目标等6字段画像 | `StudentProfile` 6字段+extended字段，完全覆盖 | ✅ |
+| 使用_TECH_KEYWORD_MAP识别技术关键词 | `_TECH_KEYWORD_MAP` 约20条中英映射 | ✅ |
+| 仅初次问答调用LLM，后续增量更新不移位 | 增量更新逻辑，history为空才走LLM | ✅ |
+| 返回intent_type（CLARIFICATION/GENERATION/NAVIGATION） | ✅  | ✅ |
+| domain_confidence 评估 | `_classify_confidence()` 方法，返回 high/medium/low | ✅ |
+
+**备注**：方案书未要求但代码实现的——CLARIFICATION+domain_hint存在时强制改为GENERATION（`matcher.py` 兜底）
+
+### 2.3 调度员 Matcher → `matcher.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 三步调度：意图裁决→领域解析→候选遴选 | 代码明确三步：`_classify_intent()` → `_resolve_domains()` → `_select_candidates()` | ✅ |
+| 每段选2个候选Agent | `_select_candidates()` 按 accuracy 降序 + 多样性约束，选2个 | ✅ |
+| 调度员仅属于模块一，不参与审核/裁判 | Matcher只输出dispatch_info，不参与后续阶段 | ✅ |
+| 候选输出结构 CandidateOutput | `candidate_output.py` 完整实现，含agent_id/seg_id/answer(FocusedOutputBody)/self_confidence | ✅ |
+
+### 2.4 Agent 遴选机制
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| per-function-tag 跟踪 accuracy | `agent_performance` 表字段精确匹配 | ✅ |
+| EMA 更新 | `memory_service.py` `_ema_smooth` 默认0.7 | ✅ |
+| α阶段式下降阈值 | 200/100/50对应0.3/0.5/0.7 | ✅ |
+| 冷启动默认 accuracy=0.5 | `init_db.py` seed 逻辑写入0.5 | ✅ |
+
+---
+
+## 二、资源生成（方案书第3部分）
+
+### 3.5 Schema 约束 → Schema 层
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| FocusedOutputBody (conclusion+reasoning_steps+knowledge_refs+applicable_conditions) | `focused_output.py` 精确匹配，含 `field_validator` 确保 reasoning_steps≥3 | ✅ |
+| CandidateOutput (agent_id+seg_id+answer+self_confidence) | `candidate_output.py` 精确匹配 | ✅ |
+| StudentProfile (knowledge_level+background+current_goal+question_type+domain_hint+complexity_estimate) | `student_profile.py` 6个必需字段+extended(可选) | ✅ |
+| ReviewFeedback (seg_id+candidates+cross_segment_issues) | `review_feedback.py` 精确匹配 | ✅ |
+| JudgeVerdict (verdict+opinions+debate+override+traceability) | `judge_verdict.py` 精确匹配 | ✅ |
+| ResourcePackage (lecture+guide+quiz) | `resource_package.py` 精确匹配 | ✅ |
+| Verdict 枚举: passed/revise/low_confidence_passed/failed | `judge_verdict.py` Verdict枚举精确匹配 | ✅ |
+
+### 3.6 资源生成 Agent → `resource_agent.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 3种形态：讲义/实操指南/分阶测试题 | `generate_resource_package()` 每次调用同时生成3种 | ⚠️ |
+| **条件触发机制**（方案书3.6.1节） | **代码中始终无条件生成** | ❌ |
+| 讲义：title+content_markdown+difficulty_note+knowledge_refs | `Lecture` schema 精确匹配 | ✅ |
+| 实操指南：goal+env_setup+steps_markdown+expected_output+common_issues | `PracticeGuide` schema 精确匹配 | ✅ |
+| 分阶测试题：5种题型(JUDGE/CHOICE/SHORT_ANSWER/CODE_COMPLETION/DESIGN_ANALYSIS)+4级难度 | `Quiz`/`QuizQuestion` schema 精确匹配，QuizType枚举5种，QuizDifficulty枚举4级 | ✅ |
+| 降维解释/进阶挑战（3.6.4节） | `orchestrator.py` FSM中有HEURISTIC_FOLLOWUP, REDIMENSION, ADVANCE 状态，但**实际调用链路未完整实现** | ⚠️ |
+| 代码安全检查 ast 语法检查 | `code_checker.py` 实现 `check_code_safety()` + `check_code_in_markdown()` | ✅ |
+
+**主要差距**：方案书要求根据学生答题正确率条件性触发三形态生成（≥85%→生成所有形态），代码直接全部生成。方案书的降维/进阶分支在FSM状态下定义了但未连入主流程。
+
+---
+
+## 三、审核与裁判机制（方案书第4部分）
+
+### 4.2 审核团队 → `review_team.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 三人角色：Verifier/Skeptic/Evaluator | 3个独立review方法 | ✅ |
+| Verifier: 事实核查，只看fact_accuracy | `_review_scores`中的`fact_accuracy` | ✅ |
+| Skeptic: 逻辑检查，看logic_completeness | `_review_scores`中的`logic_completeness` | ✅ |
+| Evaluator: 教学适配，看pedagogical_fit | `_review_scores`中的`pedagogical_fit` | ✅ |
+| 三人独立评分，汇总加权总分 | 加权权重 w1=0.35/w2=0.35/w3=0.30 | ✅ |
+| 审核团队找到最优候选（"谁最好"） | `_select_winner()` 选加权总分最高 | ✅ |
+
+### 4.3 跨段一致性审查
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 多段场景衔接检查 | `review_team.py` 中 `_cross_segment_check()` 是**桩函数**，打印日志但不执行 | ❌ |
+| 衔接检查清单（Skeptic专用） | 未实现 | ❌ |
+| 冲突修改规则 | 未实现 | ❌ |
+
+### 4.4 裁判团 → `judge_panel.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 三人分工（与审核不同Persona） | AgentArtCritic/AgentLogicJudge/AgentConsistency | ✅ |
+| 分歧解决状态机（MATCH→EXTEND→BREAK三态） | **简化实现**：只有一次辩论+裁决，无完整三态机 | ⚠️ |
+| 反向怀疑机制（4.4.3节） | 代码中 `_reverse_suspicion()` 有实现 | ✅ |
+| 高保真知识溯源标注（4.4.4节） | `_traceability_annotation()` 有实现，产出traceability列表 | ✅ |
+
+### 4.5 辩论机制总结
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| **第一层**：审核团队多立场独立审查 | 代码实现完整 | ✅ |
+| **第二层**：裁判团分歧解决 | 简化实现 | ⚠️ |
+| **候选Agent辩论**（落选方质疑+获胜方辩护） | **代码中缺失**——`judge_panel.py` 有 `candidate_debate` 字段定义但无实际辩论流程调用 | ❌ |
+
+**主要差距**：方案书 1.2.1 节明确强调"让真正懂领域的内容生产者参与交叉验证"，这是Debate论文的真正落地。代码中只定义了 `CandidateDebate` schema 和 `DebateRound`，但从未触发实际的辩论流程。
+
+---
+
+## 四、贡献记忆闭环（方案书第5部分）
+
+### 5.2 EMA 更新 → `memory_service.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| EMA: new = old * α + review_score * (1-α) | 精确实现 | ✅ |
+| α阶段式下降（200→0.3, 100→0.5, 50→0.7） | `_ALPHA_STAGES` 精确匹配 | ✅ |
+| 初始 accuracy=0.5 | 匹配 | ✅ |
+
+### 5.3 返工率计算
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 返工类型：none/minor/major | `contribution_memory` 表有 `rework_type` 字段 | ✅ |
+| 返工率 = 返工次数/总次数 | `agent_performance` 表有 `rework_rate` 字段，但**方案书详细的返工率计算公式未在代码中找到完整实现** | ⚠️ |
+
+### 5.5 动态淘汰 → `memory_service.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 淘汰判定：连续N次importance < threshold | `_check_elimination()` 有实现 | ✅ |
+| 离线评估队列 | `offline_evaluation_queue` 表 + `memory_repo.py` 操作 | ✅ |
+| 淘汰到 `elimination_log` | `memory_repo.py` 有 `log_elimination()` | ✅ |
+| 恢复机制 | `memory_repo.py` 有 `restore_agent()` | ✅ |
+
+### 5.7 学生反馈 → `memory_repo.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 反馈类型：helpful/not_helpful/content_error/difficulty_mismatch | `save_student_feedback()` 中 `feedback_type` 精确匹配 | ✅ |
+| 带评论 | `comment` 字段可选 | ✅ |
+
+---
+
+## 五、编排器与FSM（方案书第6部分）
+
+### 6.1 FSM → `orchestrator.py` + `fsm.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 主流程：IDLE→PROFILING→DISPATCHING→GENERATING→REVIEWING→FOCUSING→JUDGING→FORMATTING→COMPLETE | 精确实现9状态 | ✅ |
+| 异常状态：REVISING/ERROR | 有定义 | ✅ |
+| 延伸路径：QUIZ_EVAL→REDIMENSION/ADVANCE/RECHECK→HEURISTIC_FOLLOWUP | **FSM状态枚举中定义了，但orchestrator主流程未实现完整调用链** | ⚠️ |
+| 验证→调整→追问延伸闭环 | 只定义了状态，代码中无实际触发逻辑 | ❌ |
+
+### 6.2 聚焦输出 → `focused_output.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| conclusion (str, 必填) | `FocusedOutputBody.conclusion: str` | ✅ |
+| reasoning_steps (list[str], ≥3) | `min_length=3` 通过 `field_validator` 确保 | ✅ |
+| knowledge_refs (list of dict) | 字段存在，含chunk_id/claim/verification_status | ✅ |
+| applicable_conditions (str, 可空) | 字段存在，可选 | ✅ |
+
+### 6.3-6.6 知识库 RAG 实现
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 双后端：ChromaDB / NumpyKB | 完整实现，通过 `kb_manager` 自动选择 | ✅ |
+| 降级到 Stub（不影响主流程） | 三方降级链：numpy→chroma→stub | ✅ |
+| bge-m3 Embedding | `embedding_service.py` 实现懒加载，支持 FlagEmbedding / sentence-transformers 双后端 | ✅ |
+| MarkdownHeaderTextSplitter 等价实现 | `document_loader.py` 不依赖langchain，自行实现标题切分 | ✅ |
+| 混合检索：dense(bge-m3) + sparse(BM25) → RRF 融合 | `numpy_knowledge_base.py` 完整实现 | ✅ |
+| 查询扩展+术语映射表（v7.0新增） | `query_expander.py` + `term_mapping.py` 实现约150条映射 | ✅ |
+| Top-K=3, Score阈值0.6 | 默认参数一致 | ✅ |
+| 约7000 chunks（方案书记载） | 代码使用默认chunk_size=800字 | ✅ |
+
+---
+
+## 六、量化指标（方案书第7部分）
+
+### 7.1-7.3 → `task_metrics` 表 + `validate_metrics.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| task_metrics 表（13列） | 表中字段：`verdict, verification_rate, traceability_total, traceability_verified, knowledge_refs_count, fact_accuracy, logic_completeness, pedagogical_fit, review_score, override_reason` | ✅ |
+| 写入逻辑 `_save_task_metrics()` | `ask.py` 中实现，从 judge_verdict+review_summary 提取写入 | ✅ |
+| `validate_metrics.py` | 文件存在，但编码问题显示为乱码，内容不可读 | ⚠️ |
+
+### 7.4 数据合规 → `compliance.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| 会话隔离（session_id隔离） | `conversations` 表 + `ensure_session()` | ✅ |
+| 数据保留（默认30天） | `conversation_retention_days` 默认30天 | ✅ |
+| AI生成内容标注 | `annotate_ai_content()` + `is_ai_generated` 列 | ✅ |
+| 清理过期记录 | `cleanup_expired()` | ✅ |
+
+---
+
+## 七、可视化（方案书第8部分）
+
+### 8.2 → `backend/api/routes/status.py`, `ws.py`, `report.py`
+
+| 方案要求 | 代码实现 | 状态 |
+|---------|---------|------|
+| FSM状态流实时展示 | `ws.py` WebSocket推送FSM状态 | ✅ |
+| 盲区热力图（组件1） | 前端实现，后端暂未读详细代码 | N/A |
+| 资源难度匹配曲线（组件2） | `task_resource_stats` 表作为数据源已创建 | ✅ |
+| 学习路径图（组件3） | 前端实现，后端暂未读详细代码 | N/A |
+| 学情报告 API | `report.py` 提供 /api/report 端点 | ✅ |
+
+---
+
+## 差异化摘要
+
+### 关键差异（需修复）
+
+| 编号 | 方案书要求 | 代码现状 | 影响评估 |
+|------|-----------|---------|---------|
+| D1 | 候选Agent辩论（4.5节） | 缺失；只定义了schema，无实际辩论调用 | ⬆️ 高——辩论是赛题核心创新点 |
+| D2 | 跨段一致性审查（4.3节） | 桩函数，未实现实际审查逻辑 | ⬆️ 高——多段场景质量保障 |
+| D3 | 资源生成条件触发（3.6.1节） | 无条件全部生成 | ⬆️ 中——影响响应时间和资源针对性 |
+| D4 | 交付后延伸路径（6.1.3节） | FSM定义了状态但无完整调用链 | ⬆️ 中——闭环完整性缺失 |
+| D5 | 裁判团三态分歧解决状态机（4.4.2节） | 简化实现 | ⬆️ 中——辩论严谨性降低 |
+| D6 | 返工率计算公式（5.3节） | rework_rate字段存在但未验证公式实现 | ⬇️ 低——不影响功能，仅指标精度 |
+
+### 次要偏差（可选优化）
+
+| 编号 | 描述 | 
 |------|------|
-| 方案书技术规格项 | 83项 |
-| 已正确实现 | 70项 (84.3%) |
-| 存在差异 | 10项 (12.0%) |
-| 未实现 | 3项 (3.6%) |
+| M1 | 方案书Verdict枚举为小写 `passed/revise/low_confidence_passed/failed`，代码中PascalCase `PASSED/REVISE/LOW_CONFIDENCE_PASSED/FAILED`，DB存储格式需确认是否一致 |
+| M2 | `review_team.py` 中审核评分使用 `_review_scores()` 内部函数而非正式ReviewerScores schema |
+| M3 | 方案书要求知识库约7000 chunks，代码默认chunk_size=800，实际数量取决于文档源 |
 
-**结论**: 主流程（单领域场景）的代码实现与方案书高度匹配，配好API Key即可跑通完整闭环。核心架构亮点（FSM状态机、SOP Schema链、三层JSON兜底、候选辩论、贡献记忆闭环、早停机制、双低RAG触发）均已落地。差异主要集中在**多段场景处理**和**部分优化策略**上。
+### 已超预期实现的
 
----
-
-## 二、已正确实现的核心机制（30项确认）
-
-以下方案书要求已在代码中正确实现，无需修改：
-
-### 模块一：学情诊断Agent
-- [x] 学情画像生成（9字段枚举约束）
-- [x] 增量更新机制（版本号递增 + 历史检索）
-- [x] 三步调度框架（意图裁决 → 领域解析 → 候选遴选）
-- [x] 标签匹配度计算（primary 1.0 / secondary 0.7 / domain_tags 0.5）
-- [x] α动态权重（config_repo get/set，冷启动0.9）
-- [x] **早停机制**（连续2轮importance_score波动<0.05 → 只选Top-1）
-- [x] 动态淘汰（连续3次importance<0.5 → 挂起 + 进入离线评估队列）
-
-### 模块二：领域知识生成Agent池
-- [x] 11个Agent卡片静态定义（agent_registry.py）
-- [x] 候选输出含self_confidence自评估（同轮生成，0额外调用）
-- [x] **双低触发RAG增强**（两个候选self_confidence都<0.5 → 知识库检索 + 重新生成）
-- [x] 聚焦输出含审核反馈回流（MAR落地：只传具体问题不传评分）
-- [x] 聚焦输出保持LLM会话上下文（history参数）
-- [x] 聚焦输出使用高档模型（GPT-4o）
-- [x] 三层JSON兜底校验（原生约束 → 正则修复 → LLM修复）
-- [x] 资源生成3种形态条件触发（讲义必选 / 实操看code_example / 测试题看question_type）
-- [x] 降维解释生成完整资源包（讲义+实操+测试题，非仅讲义）
-- [x] 进阶挑战动态追加
-
-### 模块三：审核团队 + 裁判团
-- [x] 审核团队3人Persona（Verifier/Skeptic/Evaluator）
-- [x] **Skeptic 5条固定检查清单**（自计算总分，不信任LLM自报分）
-- [x] Verifier知识库逐条核查
-- [x] Evaluator 4维教学适配评估
-- [x] 段内评选加权汇总（w1/w2/w3可配置）
-- [x] 跨段一致性审查
-- [x] 裁判团3人独立审查（并行asyncio.gather）
-- [x] **分歧解决完整流程**（少数方举证 → 多数方回应 → 裁判长裁决）
-- [x] **候选Agent辩论**（落选质疑 + 获胜辩护）
-- [x] **MaW→C转化路径**（辩论揭示新问题 → 改判REVISE）
-- [x] 高保真知识溯源标注（逐条verify_statement）
-
-### 模块四：贡献记忆闭环
-- [x] EMA更新accuracy（EMA_SMOOTH=0.8）
-- [x] 返工率计算（verdict映射为rework_score）
-- [x] importance_score = 0.5×accuracy + 0.3×(1-rework_rate) + 0.2×count_normalized
-- [x] 冷启动保护（count<5 返回默认0.5）
-- [x] 学生反馈4种类型（helpful/not_helpful/content_error/difficulty_mismatch）
-- [x] **difficulty_mismatch不挂钩Agent表现**（由编排器触发画像重新评估）
-
-### 模块五：编排器
-- [x] FSM 16状态（9主流程 + 2异常 + 5延伸路径）
-- [x] 状态转移合法性校验（can_transition）
-- [x] WebSocket实时状态推送
-- [x] 退回修改机制（revision_count上限=2）
-- [x] 延伸路径4条全部实现（REDIMENSION/ADVANCE/RECHECK/HEURISTIC_FOLLOWUP）
-- [x] 延伸路径正确调用对应Agent（ResourceAgent/JudgePanel/ProfileAgent）
-- [x] 任务上下文缓存（_task_contexts供延伸路径恢复）
+| 编号 | 描述 |
+|------|------|
+| E1 | 查询扩展+术语映射表（v7.0新增功能已完整实现） |
+| E2 | 混合检索（dense+sparse+RRF融合）——方案书未详细要求但为提升召回率优化 |
+| E3 | 意图兜底逻辑（CLARIFICATION+domain_hint→GENERATION）——提升用户体验 |
+| E4 | 双后端知识库自动降级（numpy→chroma→stub）——健壮性远超方案书 |
+| E5 | 代码安全检查（ast语法检查+危险操作检测+markdown代码块检测）——安全增强 |
 
 ---
 
-## 三、差异清单（按严重程度分级）
+## 修复建议优先级
 
-### P0 — 高严重性（影响核心流程正确性）
-
-#### GAP-1: 多段聚焦输出合并 — 只取第一段 ✅ 已修复
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | `orchestrator.py` `_do_judging()` 第401行, `_do_formatting()` 第464行 |
-| 方案书要求 | 4.3节：跨段一致性审查后各段最优拼接；裁判团审查合并后的完整输出 |
-| 代码现状 | `focused = ctx.focused_outputs[0]` — 只取第一段送裁判团审查和资源生成 |
-| 影响 | 跨领域（2段）和全链路（4段）场景下，第2段及之后的聚焦输出未经裁判审查，资源生成也只基于第一段 |
-| 修复方案 | 方案A：在FOCUSING后增加合并步骤，将多段FocusedOutput拼接为一份；方案B：裁判团循环审查各段 |
-| 修复难度 | 中 |
-| 修复状态 | ✅ 已修复：各段独立裁判 + `_merge_judge_verdicts()` 合并裁决 + `_merge_focused_outputs()` 合并输出 |
-
-#### GAP-2: 延伸路径多段处理 — 只处理第一段 ✅ 已修复
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | `orchestrator.py` `_do_redimension()` 第574行, `_do_advance()` 第604行, `_do_recheck()` 第633行 |
-| 方案书要求 | 6.1.3节：延伸路径应作用于完整交付内容 |
-| 代码现状 | 所有延伸路径方法都只取 `ctx.focused_outputs[0]` |
-| 影响 | 多段场景下降维解释/进阶挑战/审核复检只作用于第一段 |
-| 修复方案 | 循环处理各段，或与GAP-1一并修复（合并后再处理） |
-| 修复难度 | 低（若GAP-1已修复则自动解决） |
-| 修复状态 | ✅ 已修复：全部改用 `ctx.merged_focused_output` |
+1. **D1（候选Agent辩论）**：在 `judge_panel.py.judge()` 中，当裁判团出现2:1分歧且confidence较高时，触发候选Agent辩论。调用获胜Agent和落选Agent的 `debate_response()` 方法，辩论结果合并到 `candidate_debate` 字段。
+2. **D2（跨段一致性审查）**：在 `orchestrator.py` 的 REVIEWING 阶段，若为多段任务（segments > 1），调用 `review_team._cross_segment_check()` 实际逻辑。
+3. **D4（延伸路径）**：在 `orchestrator.py` 的 COMPLETE 状态后，增加从 `student_feedback` 表或quiz评价结果判断是否触发 QUIZ_EVAL→REDIMENSION/ADVANCE 分支。
+4. **D3（条件触发）**：`resource_agent.py` 增加student_profile参数，根据 `knowledge_level` 和 quiz评价结果决定是否跳过某些形态生成。
 
 ---
 
-### P1 — 中严重性（影响功能完整性或性能）
-
-#### GAP-3: 反向怀疑机制 — 仅Prompt文本，无代码逻辑 ✅ 已修复
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | `judge_panel.py` `JudgeFact.system_prompt` 第51-52行 |
-| 方案书要求 | 4.4.3节：knowledge_refs≥5 / code_example≥20行 / reasoning_steps≥8步时触发严格审查（被动触发式） |
-| 代码现状 | 仅在system_prompt中写了文本说明"若knowledge_refs≥5条 / code_example≥20行 / reasoning_steps≥8步，启用严格审查"，依赖LLM自行判断 |
-| 问题 | 代码没有主动检测FocusedOutput字段值，触发时也未改变审查行为（如增加检索Top-K、提高通过阈值、注入不同prompt） |
-| 影响 | 反向怀疑的触发完全依赖LLM理解力，没有确定性保证；方案书定位为"创新点4"的核心机制 |
-| 修复方案 | 在`judge()`方法中添加阈值检测：检查`len(focused.knowledge_refs)`、`len(focused.code_example.splitlines())`、`len(focused.reasoning_steps)`，触发时向裁判prompt注入"严格审查模式"指令并提高verification_coverage要求 |
-| 修复难度 | 中 |
-| 修复状态 | ✅ 已修复：新增 `_detect_reverse_suspicion()` 主动检测 + 严格审查指令注入 + 验证率<100%降级 |
-
-#### GAP-4: 审核团队3人评分未并行
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | `review_team.py` `review_segment()` 第235-237行 |
-| 方案书要求 | 8.4.2节优化1：审核团队3人调用并行（节省2×3秒） |
-| 代码现状 | 3人串行执行：`v_score = await self.verifier.review(...)` → `s_score = await ...` → `e_score = await ...` |
-| 影响 | 每个候选审核多耗时约6秒；跨领域场景（6次审核）多耗时约36秒 |
-| 修复方案 | 改为 `asyncio.gather(self.verifier.review(...), self.skeptic.review(...), self.evaluator.review(...))` |
-| 修复难度 | 低 |
-
-#### GAP-5: α动态切换逻辑缺失
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | `config_repo.py` `get_alpha()` / `set_alpha()` |
-| 方案书要求 | 2.4.2节：α冷启动0.9 → 数据积累后0.3（自动切换） |
-| 代码现状 | 只有手动get/set接口，没有自动切换逻辑 |
-| 问题 | α需要人工调用set_alpha更新，不会随系统运行自动从0.9降到0.3 |
-| 修复方案 | 在`memory_service.record_task_completion()`完成后，检查全系统总记录数（如>100条），自动调用`config_repo.set_alpha(0.3)`；或设置阶梯式降α（50条→0.7, 100条→0.5, 200条→0.3） |
-| 修复难度 | 低 |
-
-#### GAP-6: 缺少阶段级降级策略
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | `orchestrator.py` 全局try-catch（第138-147行） |
-| 方案书要求 | 8.5.3节模型降级 + 隐含的流程降级（学情诊断失败→默认画像，资源生成失败→仅讲义等） |
-| 代码现状 | 任何阶段失败直接进ERROR状态，整个流程中断返回错误 |
-| 影响 | 单点失败（如LLM超时）导致整个任务失败，无优雅降级 |
-| 修复方案 | 各`_do_xxx`方法中添加try-catch：PROFILING失败→使用默认画像；FOCUSING失败→用候选输出直接送裁判；FORMATTING失败→仅生成讲义 |
-| 修复难度 | 中 |
-
----
-
-### P2 — 低严重性（不影响主流程，属于优化项）
-
-#### GAP-7: 多处LLM输出未使用三层校验
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | 6处方法使用 `json.loads(raw)` 而非 `generate_and_validate()` |
-| 涉及文件 | `domain_agent.py` debate_challenge/debate_defense, `judge_panel.py` _judge_single/_majority_response/_chief_judge_arbitrate, `profile_agent.py` generate_heuristic_followup, `resource_agent.py` generate_advance_challenge |
-| 方案书要求 | 3.5.2节：所有Agent输出应经过三层兜底 |
-| 代码现状 | 这些方法有 `except json.JSONDecodeError` 兜底返回原始文本，但非完整三层修复 |
-| 影响 | LLM返回格式异常时降级为原始文本，可能影响下游处理质量 |
-| 修复方案 | 统一改用`generate_and_validate()`，或封装一个轻量级`parse_json_safe()`方法 |
-| 修复难度 | 低 |
-
-#### GAP-8: 裁判团快速通道未实现
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | `judge_panel.py` `judge()` 方法 |
-| 方案书要求 | 8.4.2节优化4：若审核评分全票一致（分差<0.05），裁判团只做溯源标注，跳过分歧解决 |
-| 代码现状 | 所有场景都走完整裁判流程（3人审查 → 汇总 → 可能分歧解决） |
-| 影响 | 高置信度场景多耗时约3-6秒 |
-| 修复方案 | `judge()`方法开头检查审核评分一致性，若全票一致则简化裁判prompt为仅溯源标注 |
-| 修复难度 | 低 |
-
-#### GAP-9: 缺少学情画像缓存机制
-
-| 属性 | 值 |
-|------|-----|
-| 位置 | `profile_agent.py` `generate_profile()` |
-| 方案书要求 | 8.4.2节优化2：同一学生后续问题不重新生成学情画像（节省3秒） |
-| 代码现状 | 每次都调用LLM生成画像（虽有增量更新版本号，但仍每次调LLM） |
-| 影响 | 连续对话场景每次多耗时约3秒 |
-| 修复方案 | 检查session最近画像，若domain_hint和knowledge_level未变化则复用 |
-| 修复难度 | 低 |
-
-#### GAP-10: 缺少代码可执行性沙箱检查
-
-| 属性 | 值 |
-|------|-----|
-| 方案书要求 | 3.5.1节：代码可执行性检查（沙箱执行code_example） |
-| 代码现状 | 无沙箱执行机制 |
-| 影响 | code_example可能有语法错误或不可执行 |
-| 修复方案 | 使用`subprocess`在受限环境中执行code_example，或使用`ast.parse`做语法检查 |
-| 修复难度 | 高（安全沙箱环境搭建复杂，但方案书也未要求必须实现，属于理想化验证） |
-
----
-
-## 四、修复优先级建议
-
-### 第一批（必须修复 — 影响核心功能）
-1. **GAP-1 + GAP-2**: 多段合并问题 — ✅ 已修复
-2. **GAP-3**: 反向怀疑代码逻辑 — ✅ 已修复
-
-### 第二批（建议修复 — 影响性能和鲁棒性）
-3. **GAP-4**: 审核团队并行化 — 简单改动，大幅提升性能
-4. **GAP-5**: α自动切换 — 简单改动，完善闭环优化
-5. **GAP-6**: 阶段级降级策略 — 提升系统鲁棒性
-
-### 第三批（可选修复 — 属于优化项）
-6. **GAP-7**: 统一三层校验 — 提升输出质量一致性
-7. **GAP-8**: 裁判团快速通道 — 性能优化
-8. **GAP-9**: 画像缓存 — 性能优化
-9. **GAP-10**: 沙箱检查 — 理想化验证，非必须
-
----
-
-## 五、方案书 vs 代码架构亮点对照
-
-| 方案书亮点 | 论文来源 | 代码实现位置 | 实现状态 |
-|-----------|---------|------------|---------|
-| Agent Pool + Agent Card | MetaGPT | agent_registry.py, init_db.py | 完整 |
-| SOP 6个中间产物Schema | MetaGPT | schemas/ 目录6个文件 | 完整 |
-| 候选自评估self_confidence | DyLAN | domain_agent.py generate_candidate() | 完整 |
-| 双低触发RAG增强 | DyLAN | orchestrator.py _do_generating() | 完整 |
-| 早停机制 | DyLAN | matcher.py _select_candidates() | 完整 |
-| 审核反馈回流 | MAR | domain_agent.py generate_focused_output() | 完整 |
-| 3人Persona分工 | MAR | review_team.py Verifier/Skeptic/Evaluator | 完整 |
-| 候选Agent辩论 | Debate | judge_panel.py _resolve_dissent() | 完整 |
-| MaW→C转化路径 | Debate | judge_panel.py _resolve_dissent() 第266行 | 完整 |
-| 分歧解决DISSENT_RESOLVE | Debate | judge_panel.py _resolve_dissent() | 完整 |
-| 反向怀疑机制 | Debate | judge_panel.py `_detect_reverse_suspicion()` + `judge()` | **完整** |
-| 三层JSON兜底 | MetaGPT | json_validator.py + base_agent.py | 完整 |
-| 贡献记忆EMA+淘汰 | DyLAN | memory_service.py | 完整 |
-| 高保真溯源标注 | 赛题要求 | judge_panel.py _annotate_traceability() | 完整 |
-| 启发式追问 | 赛题要求 | profile_agent.py generate_heuristic_followup() | 完整 |
-| 降维解释动态追加 | 赛题要求 | resource_agent.py generate_dimension_reduction() | 完整 |
-| FSM 16状态编排器 | MetaGPT | fsm.py + orchestrator.py | 完整 |
-
----
-
-*报告结束*
+*报告结束。对比基准：方案书 v7.0（2026-07-13） | 代码状态：2026-07-28*  
+*对比方法：全文阅读 × 手工验证，每条结论基于代码实际内容而非记忆。*

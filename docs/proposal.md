@@ -202,12 +202,38 @@
 | `intent_type` | 见2.3.1意图裁决规则 |
 | `domain_confidence` | 见2.3.2领域解析规则 |
 
-### 2.2.4 增量更新机制
+### 2.2.4 增量更新机制（含画像缓存优化）
 
 > 对齐赛题要求：连续对话场景下学情画像需随学生提问动态演进。
 
+**画像缓存复用（代码实现优先策略）**：
+
+为节省LLM调用（每次~3秒），同一session已有画像时直接复用，仅在首次提问时调用LLM生成。
+
+```python
+# 代码实现逻辑（profile_agent.py）：
+latest = profile_repo.get_latest_profile(session_id)
+if latest:
+    cached_profile = self._profile_from_dict(latest)
+    if cached_profile:
+        return cached_profile  # 复用已有画像，跳过LLM调用
 ```
-触发条件：
+
+**真正的增量更新（后续版本）**：
+
+当前v7.0采用**画像缓存复用**优先策略（已实现），真实的多轮历史综合评估（检索近3次历史→LLM重新输出）计划在V2.0中实现。
+
+缓存复用与增量更新的取舍：
+
+| 策略 | 响应时间 | LLM调用成本 | 画像准确度 | 实现状态 |
+|------|---------|-------------|-------------|---------|
+| 缓存复用（当前） | ~2s（仅DB读取） | 0次/轮 | 较高（首轮LLM生成质量高） | ✅ 已实现 |
+| 增量更新（V2.0） | ~5s（含LLM调用） | 1次/轮 | 更高（综合历史判断） | 🔜 计划中 |
+
+> **设计理由**：v7.0使用缓存复用作为性能优化（方案书§8.4.2优化2），首轮LLM画像已覆盖知识水平、意图、领域等核心字段。对于竞赛演示场景，同一session短对话内学生知识水平不突变，缓存复用不会显著降低精度。
+
+```
+触发条件（V2.0增量更新）：
   1. **必须触发**：同一session内，学生第2次及以后提问
   2. **不触发**：
      - 学生明确说"重新开始"或"换个话题"
@@ -273,6 +299,40 @@
 | **generation**（生成型） | 问题含具体技术内容/动词，domain_hint非空 | → Step 2正常调度Agent池 |
 | **navigation**（导航型） | question_type=概念理解 + 无具体技术动词 + 关键词含"推荐/方向/路线/资源" | → 输出学习路线图，追问学生选择具体阶段 |
 | **clarification**（澄清型） | domain_hint为空 + 不是导航请求 | → 输出澄清选项，等学生回答后重新生成画像 |
+
+**意图兜底（技术关键词硬映射）**：
+
+LLM对简短技术问题（如"什么是RAG"、"LangChain怎么用"）可能误判为clarification且domain_hint给空，导致澄清兜底也救不回来。为此系统内置**30+技术关键词硬映射表**，在LLM输出后强制复核：
+
+```python
+_TECH_KEYWORD_MAP: dict[str, str] = {
+    # LLM基础
+    "llm": "LLM基础", "transformer": "LLM基础", "token": "LLM基础",
+    "embedding": "LLM基础", "预训练": "LLM基础", "生成模型": "LLM基础",
+    # Prompt工程
+    "prompt": "Prompt工程", "提示词": "Prompt工程", "few-shot": "Prompt工程",
+    "cot": "Prompt工程", "思维链": "Prompt工程",
+    # LangChain
+    "langchain": "LangChain", "langgraph": "LangChain",
+    # RAG
+    "rag": "RAG", "检索增强": "RAG", "检索增强生成": "RAG",
+    # HuggingFace
+    "huggingface": "HuggingFace", "transformers库": "HuggingFace",
+    # 模型微调
+    "微调": "模型微调", "lora": "模型微调", "finetune": "模型微调",
+    # 向量数据库
+    "向量数据库": "向量数据库", "chroma": "向量数据库", "faiss": "向量数据库",
+    # Agent框架
+    "agent框架": "Agent框架", "function calling": "Agent框架", "工具调用": "Agent框架",
+    # 项目部署
+    "fastapi": "项目部署", "docker": "项目部署", "streamlit": "项目部署",
+}
+```
+
+**兜底规则**：
+1. 如果问题原文命中任一关键词，且LLM判为clarification → **强制改判generation**
+2. 如果LLM给出的domain_hint为空或遗漏了匹配的关键词对应领域 → **自动补充domain_hint**并标记为HIGH置信度
+3. 关键词映射独立于LLM判断，作为最后一道防线
 
 **意图裁决示例**：
 
@@ -421,6 +481,8 @@ generation型请求进入此步。调度员根据`domain_hint`、`domain_confide
 | 6-7 | 6-7 | 12-14 | 18-21 | 6-7 | 18-21 | 1 | **55-64次** | **~48s** |
 | 8-10 | 触发分阶段 | — | — | — | — | — | **先回答前3领域** | **~33s/批次** |
 
+> **双低RAG增强额外调用**：当某段2个候选的self_confidence都<0.5时（约15-20%场景），触发知识库RAG增强。每个候选重新生成一次（K=3知识库检索+LLM调用），每段额外+2次候选调用。加权后平均每段额外≈0.3-0.4次，已在上述估算的容差范围内。
+
 > **超过7领域时的分阶段策略**：先回答最核心的3-5个领域（按domain_confidence=high优先），在答案末尾提示"剩余领域将在下一轮补充"。避免单次响应超过45秒。
 >
 > **全链路降级策略**：审核团队3人全部调用失败 → 跳过审核，所有候选直接进入聚焦输出（前端显示黄色警告"未经多角度审核"）。裁判团3人全部调用失败 → 跳过裁判，直接输出聚焦结果 + 标注"未经裁判团审查"。部分失败（2人成功1人失败）→ 取2人均值+标注置信度降低。若学情画像生成也失败 → 使用上次缓存的画像（session内持久化）。
@@ -528,7 +590,9 @@ generation型请求进入此步。调度员根据`domain_hint`、`domain_confide
 | 500条以上 | 0.3 | 主要依赖跑出来的表现数据 |
 | 1000条以上 | 0.2 | 表现标签完全主导 |
 
-α值存储在SQLite的`system_config`表中，每次贡献记忆更新后自动调整。
+> **工程权衡声明**：α为**全局参数**（存储在SQLite的`system_config`表中），而非per-function-tag独立值。原因：per-function-tag的α需要每个function_tag积累足够数据才能准确计算衰减（约200条/function_tag），冷启动阶段全局α更稳定。当系统积累到1000条以上数据时，可升级为per-function-tag独立α。
+
+α值存储在SQLite的`system_config`表中，每次贡献记忆更新后自动调整（按总数据量而非per-tag数据量）。
 
 ### 2.4.3 动态淘汰
 
@@ -561,6 +625,14 @@ generation型请求进入此步。调度员根据`domain_hint`、`domain_confide
 
 动作：本轮遴选提前结束，直接使用当前Top-1 Agent
 目的：节省API调用，Agent之间已达成共识时不再强行迭代
+
+早停与候选辩论的关系：
+  早停场景下该段只有1个候选Agent，裁判团无法执行候选Agent辩论
+  （辩论需要落选候选质疑+获胜候选辩护，见4.4.2节）。
+  此场景裁判团直接进入分歧解决通道：
+  - 3:0通过 → 正常放行（跳过辩论环节，日志标注"early_stop_skip_debate"）
+  - 2:1分歧 → 仅执行第一层（裁判团分歧解决），跳过第二层（候选辩论）
+  - 0:3全票失败 → 进入裁判长终审门控（同正常流程）
 ```
 
 ---
@@ -690,6 +762,17 @@ Agent_Y输出答案 ┘
 
 → 跨段一致性审查 → 各段最优拼接 → 聚焦输出 → 裁判团
 ```
+
+**多段内容合并机制**：
+
+多段场景下，聚焦输出和裁判裁决分别执行合并策略：
+
+| 产物 | 合并策略 | 实现方式 |
+|------|---------|---------|
+| 多段聚焦输出 | 按段标注拼接 | conclusion→按[段1]/[段2]标注合并；reasoning_steps→按段分隔；knowledge_refs→直接拼接；code_example→用\n\n分隔；difficulty_note→按段标注 |
+| 多段裁判裁决 | 取最严格结果 | 整体裁决优先级：FAILED > REVISE > LOW_CONFIDENCE_PASSED > PASSED；裁判意见按段[段1]/[段2]标注合并；验证率取平均；分歧解决记录取第一个非空 |
+
+**设计理由**：各段内容独立，不适宜强制融合。按段保留标识既保证一致性又保证可追溯性。
 
 ### 3.4.3 全链路问题（3-5段，每段2个候选Agent）
 
@@ -848,7 +931,32 @@ Agent填完Schema后，系统自动执行三项检查（不需要人工）：
 |--------|---------|-------------|
 | Schema完整性 | JSON Schema校验（程序化） | 缺必填字段 → 退回Agent补填（最多2次） |
 | 引用可溯源性 | 对`knowledge_refs`每条去向量库检索验证 | 无依据 → 标记为"待验证"，不强制退回 |
-| 代码可执行性 | 在沙箱环境执行`code_example`（仅当有此字段时） | 语法错误 → 退回Agent修正（最多2次） |
+| 代码安全检查 | AST静态分析（ast.parse + 危险操作检测） | 检测到危险操作（eval/exec/subprocess等）→ 在原输出末尾追加安全检查警告，不阻断流程 |
+
+**代码安全检查方式**：
+
+采用**Python AST静态分析**替代沙箱执行。理由：
+1. 沙箱执行耗时长（需docker容器+依赖安装），会显著增加响应延迟
+2. AST分析无需执行代码即可检测语法错误和危险操作（eval/exec/subprocess/open/requests等），安全且即时
+3. 危险操作不自动阻断（GPT-4o/DeepSeek生成的代码含敏感操作不一定恶意，可能是教学所需），以警告形式追加到生成的文档中，提醒学生注意
+
+检查过程（代码实现）：
+```python
+def check_code_in_markdown(markdown_text: str) -> str | None:
+    """提取markdown中所有代码块，逐块做AST语法检查 + 危险操作检测
+    
+    危险操作黑名单：
+      - ast.Call: func.id in ['eval', 'exec', 'compile', '__import__']
+      - ast.Attribute: attr in ['subprocess', 'Popen', 'run', 'call', 'check_call']
+    返回：问题描述字符串（无问题返回None）
+    """
+    for code_block in extract_code_blocks(markdown_text):
+        tree = ast.parse(code_block)  # 语法检查
+        dangerous = detect_dangerous_calls(tree)
+        if dangerous:
+            return f"检测到危险操作: {', '.join(dangerous)}"
+    return None
+```
 
 **退回修改最多2次**，2次仍不合格则直接输出，携带"低置信度"标记交给裁判团处理。
 
@@ -896,13 +1004,15 @@ Agent填完Schema后，系统自动执行三项检查（不需要人工）：
 
 ### 3.6.1 触发时机与条件判断
 
-裁判团对聚焦输出做出"通过"裁定后，资源生成Agent介入。**3种形态按条件触发，不是每次都全部生成**：
+裁判团对聚焦输出做出"通过"裁定后，资源生成Agent介入。
+
+> **代码实践验证：三种形态均始终生成**。实操指南和分阶测试题的原条件触发条件（code_example非空、question_type白名单）已在实现中放宽为始终生成，由LLM Prompt自适应内容形态。概念类问题同样需要操作指引（决策清单、应用检查表），调试排错类同样需要测试题（找错题、综合分析题）。实现确保`practice_guide`和`quiz`字段始终非null，降低学生收到空资源概率。
 
 | 形态 | 触发条件 | 说明 |
 |------|---------|------|
 | **定制化讲义** | **必选**（始终生成） | 基础形态，几乎是格式化输出，API成本低 |
-| **实操指南** | 条件触发：聚焦输出JSON中**含`code_example`字段** | 有代码操作才需要实操指南 |
-| **分阶测试题** | 条件触发：`question_type ∈ {"概念理解", "操作步骤", "架构设计"}` | 需要巩固的知识点才出题，调试排错类不出题 |
+| **实操指南** | **始终生成**（含代码→代码实操步骤；无代码→决策检查清单/应用步骤） | 概念类问题同样需要操作指引（评估步骤、落地路线图），放宽条件后学生始终收到可操作的步骤化内容 |
+| **分阶测试题** | **始终生成**（根据question_type自适应题型） | 调试排错类转找错题，全链路规划类转综合分析题，确保学生始终有自测手段 |
 
 ### 3.6.2 三种形态详细设计
 
@@ -1364,6 +1474,16 @@ Agent输出：{输出内容}
        → 3:0 → [PASSED]
        → 仍有异议 → 回到[COMPARING]，但修改次数+1
        → 修改达到2次上限 → 标注"低置信度"强制通过
+
+  **0:3全票失败 → 裁判长终审门控**：
+       \> 0:3在原方案状态机中未定义路径（DISSENT_RESOLVE只处理2:1）。
+       \> 终审门控规则：
+       \>   裁判长（事实审查裁判）做最后一次评估：
+       \>     内容是否达到最低可接受标准？
+       \>     达到 → 标注LOW_CONFIDENCE_PASSED + "终审挽救"，正常降级放行
+       \>     未达到 → 仍放行（竞赛要求不能拒绝学生），但标注"unanimous_fail_force_pass"强制放行标记
+       \>   设计意图：终审门控确保大部分0:3被挽救（改判），只有终审也确认不行的才标记强制放行 → 真正的强制放行极少
+       \> 终审Prompt模板见[附录：全票失败终审Prompt](./#全票失败终审Prompt)
 ```
 
 **候选Agent辩论的设计理由（Debate论文真正落地）**：
@@ -2047,6 +2167,42 @@ def check_elimination(agent_id):
 
 ### 6.1.2 编排器技术实现
 
+**实时状态推送（ws_manager.push_state）**：
+
+系统内置WebSocket状态推送机制，每个FSM阶段切换时将当前状态、产物摘要、进度信息推送到前端。
+
+```python
+# 使用方式（代码实现）：
+async def _do_profiling(self, ctx):
+    await ws_manager.push_state(ctx.task_id, "PROFILING")
+    # ...
+    await ws_manager.push_state(ctx.task_id, "PROFILING", {"profile": profile.model_dump()})
+
+async def _do_dispatching(self, ctx):
+    await ws_manager.push_state(ctx.task_id, "DISPATCHING")
+    ctx.dispatch_result = self.matcher.dispatch(ctx.profile)
+    await ws_manager.push_state(ctx.task_id, "DISPATCHING", {
+        "intent": ctx.dispatch_result.intent.value,
+        "segments": len(ctx.dispatch_result.segments),
+    })
+```
+
+**推送内容时序表**：
+
+| FSM阶段 | 初始推送 | 完成推送 |
+|---------|---------|---------|
+| IDLE | 状态切换 | — |
+| PROFILING | 状态名称 | 学情画像JSON（完整） |
+| DISPATCHING | 状态名称 | intent类型 + 段数 |
+| GENERATING | 状态名称 | 已生成段数 |
+| REVIEWING | 状态名称 | 获胜Agent列表 |
+| FOCUSING | 状态名称 | 聚焦输出段数 |
+| JUDGING | 状态名称 | 裁决结果 + 段数 |
+| FORMATTING | 状态名称 | 各形态是否生成 |
+| COMPLETE | 状态名称 | revision次数 + session_id |
+
+**状态缓存更新**：每阶段完成后更新预计算字段（revision_count、session_id），保证`/api/status`接口返回最新状态，避免前端轮询延迟。
+
 ```
 技术选型：FastAPI + 异步任务编排
 
@@ -2547,6 +2703,13 @@ collection.add(
   - Top-K：验证时K=3（取Top-3相关片段做核对）
   - Score阈值：相似度<0.6的检索结果视为"无法确认"
   - bge-m3混合检索：默认启用稠密+稀疏混合模式，提升跨语言召回率
+
+分类过滤（filter_agent）：
+  知识库chunk入库时标注所属Agent_name（即该chunk最相关的领域Agent名称）。
+  检索时，Agent按自己的agent_name过滤chunk：
+    filter_agent = agent.agent_name（如"LangChain组件Agent"只检索与其相关的chunk）
+  作用：每个Agent只检索自己分类下的chunk，提高检索精度，避免跨领域噪声。
+  若filter_agent过滤后无结果 → fallback到全局无过滤检索，确保知识库可访问性。
 ```
 
 ---
@@ -3079,7 +3242,7 @@ IDLE → PROFILING（画像生成）→ DISPATCHING（调度：段1[RAG]-Agent_4
   节省：$360-2,160
 ```
 
-### 8.5.3 模型降级策略
+### 8.5.3 模型降级策略（含全链路过程降级）
 
 ```
 若高档模型（GPT-4o）不可用：
@@ -3094,6 +3257,26 @@ IDLE → PROFILING（画像生成）→ DISPATCHING（调度：段1[RAG]-Agent_4
   全部使用DeepSeek-V3本地部署，成本$0（需1×A100 GPU）
   代价：响应时间增加约50%（本地推理速度低于API）
 ```
+
+#### 全链路过程降级（代码实现级）
+
+除模型降级外，系统在FSM各阶段均实现细粒度降级策略，确保单个阶段失败不中断主流程：
+
+| FSM阶段 | 降级策略 | 实现位置 |
+|---------|---------|---------|
+| PROFILING | LLM调用失败→使用默认画像（ENTRY/理科无编程/快速上手），不中断主流程 | orchestrator._do_profiling() |
+| DISPATCHING | 画像为空→使用默认IntentType.GENERATION，全部候选出击 | orchestrator._do_dispatching() |
+| GENERATING | 候选Agent调用失败→跳过该候选，使用成功候选的输出 | orchestrator._do_generating() |
+| FOCUSING | 聚焦输出调用失败→用候选输出直接构造最小FocusedOutput（conclusion≈候选输出，reasoning_steps补充至3步） | orchestrator._do_focusing() |
+| REVIEWING | 审核团队全部调用失败→跳过审核，候选输出直接进入聚焦（前端显示黄色警告'未经多角度审核'） | orchestrator._do_reviewing() |
+| JUDGING | 裁判团全部调用失败→跳过裁判，直接输出聚焦结果+标注'未经裁判团审查' | orchestrator._do_judging() |
+| FORMATTING | 资源生成失败→仅生成讲义（Lecture降级模式），实操指南和测试题为null | orchestrator._do_formatting() |
+| KNOWLEDGE_BASE | 知识库不可用→跳过RAG增强，标记low_confidence_segments，审核团队自然给出低分 | orchestrator._do_generating()中双低分支 |
+
+**设计原则**：
+1. 主流程永不中断：任何阶段失败都使用前序产物或默认值继续
+2. 前端/日志透传降级状态：每个降级事件记录到日志，前端显示对应标注（黄色警告/灰色标注）
+3. 降级不逆转：一旦降级，后续阶段不能自动升级（需人工介入或下一轮重新尝试）
 
 ---
 

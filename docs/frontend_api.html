@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>wolegedou 后端接口文档 · 前端对接版</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    line-height: 1.6;
+    padding: 24px;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 {
+    color: #f0f6fc;
+    font-size: 28px;
+    margin-bottom: 8px;
+    border-bottom: 2px solid #30363d;
+    padding-bottom: 12px;
+  }
+  .subtitle { color: #8b949e; margin-bottom: 32px; font-size: 14px; }
+  h2 {
+    color: #58a6ff;
+    font-size: 20px;
+    margin: 32px 0 16px;
+    padding-left: 12px;
+    border-left: 4px solid #58a6ff;
+  }
+  h3 {
+    color: #f0f6fc;
+    font-size: 16px;
+    margin: 20px 0 12px;
+  }
+  .meta-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+  }
+  .meta-card table { width: 100%; border-collapse: collapse; }
+  .meta-card td { padding: 6px 12px; font-size: 13px; }
+  .meta-card td:first-child { color: #8b949e; width: 140px; }
+  .meta-card td:last-child { color: #e6edf3; font-family: "SFMono-Regular", Consolas, monospace; }
+  .endpoint {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .endpoint-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid #30363d;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .method {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+  .method-get { background: #1f6feb22; color: #79c0ff; border: 1px solid #1f6feb55; }
+  .method-post { background: #2ea04322; color: #7ee787; border: 1px solid #2ea04355; }
+  .method-ws { background: #8957e522; color: #d2a8ff; border: 1px solid #8957e555; }
+  .path {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 14px;
+    color: #e6edf3;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #30363d;
+    color: #8b949e;
+    margin-left: auto;
+  }
+  .tag-priority-high { background: #da363322; color: #ff7b72; }
+  .tag-priority-mid { background: #d2992222; color: #e3b341; }
+  .tag-debug { background: #1f6feb22; color: #79c0ff; }
+  .endpoint-body { padding: 16px 18px; }
+  .endpoint-body p { color: #8b949e; font-size: 13px; margin-bottom: 12px; }
+  .section-label {
+    font-size: 12px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 14px 0 8px;
+    font-weight: 600;
+  }
+  pre {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12.5px;
+    color: #e6edf3;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  .json-key { color: #79c0ff; }
+  .json-str { color: #a5d6ff; }
+  .json-num { color: #79c0ff; }
+  .json-bool { color: #ff7b72; }
+  .json-comment { color: #6e7681; font-style: italic; }
+  table.params {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin: 8px 0;
+  }
+  table.params th {
+    text-align: left;
+    padding: 8px 10px;
+    background: #21262d;
+    color: #8b949e;
+    font-weight: 600;
+    font-size: 12px;
+    border: 1px solid #30363d;
+  }
+  table.params td {
+    padding: 8px 10px;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+  }
+  table.params td:first-child {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    color: #e6edf3;
+  }
+  table.params td:nth-child(2) {
+    color: #ff7b72;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12px;
+  }
+  table.params td:nth-child(3) {
+    color: #7ee787;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12px;
+  }
+  .required { color: #ff7b72; }
+  .optional { color: #8b949e; }
+  .enum-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .enum-item {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 11px;
+    padding: 2px 7px;
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 3px;
+    color: #d2a8ff;
+  }
+  .callout {
+    background: #1f6feb11;
+    border-left: 3px solid #58a6ff;
+    padding: 10px 14px;
+    margin: 12px 0;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #c9d1d9;
+  }
+  .callout-warn {
+    background: #d2992211;
+    border-left-color: #e3b341;
+  }
+  .callout-warn { background: #d2992211; border-left-color: #e3b341; }
+  .toc {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 32px;
+  }
+  .toc-title { color: #8b949e; font-size: 12px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+  .toc-list { list-style: none; columns: 2; column-gap: 24px; }
+  .toc-list li { padding: 3px 0; }
+  .toc-list a {
+    color: #58a6ff;
+    text-decoration: none;
+    font-size: 13px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .toc-list a:hover { text-decoration: underline; }
+  .footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid #30363d;
+    color: #6e7681;
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>wolegedou 后端接口文档</h1>
+<p class="subtitle">前端对接版 · 共 11 个接口（2 系统 + 4 业务 + 4 知识库 + 1 WebSocket）</p>
+
+<div class="meta-card">
+  <table>
+    <tr><td>Base URL</td><td>http://localhost:8000</td></tr>
+    <tr><td>Swagger UI</td><td>http://localhost:8000/docs</td></tr>
+    <tr><td>ReDoc</td><td>http://localhost:8000/redoc</td></tr>
+    <tr><td>API 前缀</td><td>/api</td></tr>
+    <tr><td>CORS 允许源</td><td>http://localhost:5173 · http://localhost:3000 · http://127.0.0.1:5173</td></tr>
+    <tr><td>请求格式</td><td>application/json（除注明外）</td></tr>
+    <tr><td>响应格式</td><td>application/json</td></tr>
+    <tr><td>字符编码</td><td>UTF-8</td></tr>
+  </table>
+</div>
+
+<div class="toc">
+  <div class="toc-title">接口目录</div>
+  <ul class="toc-list">
+    <li><a href="#system">1. 系统接口（2）</a></li>
+    <li><a href="#ask">2. POST /api/ask — 学生提问</a></li>
+    <li><a href="#status">3. GET /api/status/{task_id} — 任务状态</a></li>
+    <li><a href="#feedback">4. POST /api/feedback — 学生反馈</a></li>
+    <li><a href="#quiz">5. POST /api/quiz_submit — 答题验证</a></li>
+    <li><a href="#kb">6. 知识库接口（4）</a></li>
+    <li><a href="#ws">7. WebSocket — FSM 实时推送</a></li>
+    <li><a href="#enums">8. 枚举值参考</a></li>
+    <li><a href="#flow">9. 前端调用流程</a></li>
+  </ul>
+</div>
+
+<!-- 1. 系统接口 -->
+<h2 id="system">1. 系统接口</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/</span>
+    <span class="tag">系统</span>
+  </div>
+  <div class="endpoint-body">
+    <p>根路径，返回服务信息，可用于探活。</p>
+    <div class="section-label">响应示例</div>
+<pre>{
+  <span class="json-key">"service"</span>: <span class="json-str">"多智能体协同决策系统"</span>,
+  <span class="json-key">"version"</span>: <span class="json-str">"0.1.0"</span>,
+  <span class="json-key">"docs"</span>: <span class="json-str">"/docs"</span>
+}</pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/health</span>
+    <span class="tag">系统</span>
+  </div>
+  <div class="endpoint-body">
+    <p>健康检查端点。</p>
+    <div class="section-label">响应示例</div>
+<pre>{ <span class="json-key">"status"</span>: <span class="json-str">"ok"</span> }</pre>
+  </div>
+</div>
+
+<!-- 2. /ask -->
+<h2 id="ask">2. 学生提问 — 主流程入口</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/api/ask</span>
+    <span class="tag tag-priority-high">核心</span>
+  </div>
+  <div class="endpoint-body">
+    <p>学生提交问题，触发 FSM 编排器完整流程：画像 → 调度 → 生成 → 审核 → 聚焦 → 裁判 → 格式化 → 完成。</p>
+    <div class="callout">
+      <strong>响应时间：</strong>单领域 ~20s · 跨领域 ~27s · 全链路 ~38s。<br>
+      前端建议：调用后立即拿到 <code>task_id</code>，然后用 WebSocket 订阅 <code>/ws/{task_id}</code> 接收实时状态，不要同步阻塞等待。
+    </div>
+
+    <div class="section-label">请求体 · AskRequest</div>
+    <table class="params">
+      <tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr>
+      <tr><td>question</td><td>string</td><td class="required">是</td><td>学生当前问题文本</td></tr>
+      <tr><td>session_id</td><td>string</td><td class="required">是</td><td>会话 ID，同一会话内多次提问保持一致</td></tr>
+      <tr><td>history</td><td>array&lt;object&gt;</td><td class="optional">否</td><td>历史对话（同 session 首次为空），格式 [{role, content}]</td></tr>
+    </table>
+
+    <div class="section-label">请求示例</div>
+<pre>{
+  <span class="json-key">"question"</span>: <span class="json-str">"什么是 RAG 检索增强生成？"</span>,
+  <span class="json-key">"session_id"</span>: <span class="json-str">"sess_abc123"</span>,
+  <span class="json-key">"history"</span>: []
+}</pre>
+
+    <div class="section-label">响应体 · AskResponse</div>
+    <table class="params">
+      <tr><th>字段</th><th>类型</th><th>必含</th><th>说明</th></tr>
+      <tr><td>task_id</td><td>string</td><td class="required">是</td><td>本次任务 ID，用于查状态、反馈、答题</td></tr>
+      <tr><td>session_id</td><td>string</td><td class="required">是</td><td>会话 ID（回传）</td></tr>
+      <tr><td>profile</td><td>object|null</td><td class="optional">否</td><td>学情画像 JSON（knowledge_level / background / current_goal 等）</td></tr>
+      <tr><td>resource_package</td><td>object|null</td><td class="optional">否</td><td>资源包：{lecture, guide, quiz} 讲义/指南/测试题</td></tr>
+      <tr><td>judge_verdict</td><td>object|null</td><td class="optional">否</td><td>裁判团裁决：{verdict, opinions, sources}</td></tr>
+      <tr><td>dispatch_info</td><td>object|null</td><td class="optional">否</td><td>调度信息：选中了哪些 Agent、各自信度</td></tr>
+      <tr><td>navigation_roadmap</td><td>string|null</td><td class="optional">否</td><td>学习路径导航文本</td></tr>
+      <tr><td>clarification_options</td><td>array&lt;string&gt;|null</td><td class="optional">否</td><td>澄清选项（问题模糊时返回，让用户选）</td></tr>
+      <tr><td>error</td><td>string|null</td><td class="optional">否</td><td>错误信息（非 null 时表示处理失败）</td></tr>
+      <tr><td>disclaimer</td><td>string</td><td class="required">是</td><td>AI 内容声明（固定文案）</td></tr>
+      <tr><td>from_cache</td><td>boolean</td><td class="required">是</td><td>是否命中离线缓存（true 时响应极快）</td></tr>
+    </table>
+
+    <div class="section-label">响应示例</div>
+<pre>{
+  <span class="json-key">"task_id"</span>: <span class="json-str">"task_20260719_001"</span>,
+  <span class="json-key">"session_id"</span>: <span class="json-str">"sess_abc123"</span>,
+  <span class="json-key">"profile"</span>: {
+    <span class="json-key">"knowledge_level"</span>: <span class="json-str">"intermediate"</span>,
+    <span class="json-key">"background"</span>: <span class="json-str">"cs_student"</span>,
+    <span class="json-key">"current_goal"</span>: <span class="json-str">"learn_basics"</span>
+  },
+  <span class="json-key">"resource_package"</span>: {
+    <span class="json-key">"lecture"</span>: <span class="json-str">"RAG 是 Retrieval-Augmented Generation..."</span>,
+    <span class="json-key">"guide"</span>: <span class="json-str">"步骤 1：准备文档..."</span>,
+    <span class="json-key">"quiz"</span>: [{<span class="json-key">"question"</span>: <span class="json-str">"..."</span>, <span class="json-key">"options"</span>: [], <span class="json-key">"answer"</span>: <span class="json-str">"B"</span>}]
+  },
+  <span class="json-key">"judge_verdict"</span>: {
+    <span class="json-key">"verdict"</span>: <span class="json-str">"pass"</span>,
+    <span class="json-key">"opinions"</span>: [],
+    <span class="json-key">"sources"</span>: []
+  },
+  <span class="json-key">"dispatch_info"</span>: {
+    <span class="json-key">"selected_agents"</span>: [<span class="json-str">"agent_004"</span>],
+    <span class="json-key">"primary_domain"</span>: <span class="json-str">"RAG"</span>
+  },
+  <span class="json-key">"navigation_roadmap"</span>: <span class="json-str">"建议学习路径：1. 理解检索原理..."</span>,
+  <span class="json-key">"clarification_options"</span>: <span class="json-key">null</span>,
+  <span class="json-key">"error"</span>: <span class="json-key">null</span>,
+  <span class="json-key">"disclaimer"</span>: <span class="json-str">"⚠️ 以上内容由 AI 生成，仅供参考..."</span>,
+  <span class="json-key">"from_cache"</span>: <span class="json-bool">false</span>
+}</pre>
+  </div>
+</div>
+
+<!-- 3. /status -->
+<h2 id="status">3. 查询任务状态</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/api/status/{task_id}</span>
+    <span class="tag tag-priority-mid">轮询备用</span>
+  </div>
+  <div class="endpoint-body">
+    <p>查询任务当前 FSM 状态。WebSocket 不可用时可用轮询。</p>
+    <div class="callout callout-warn">
+      <strong>注意：</strong>服务重启后内存状态会丢失，返回 <code>UNKNOWN</code>。优先用 WebSocket。
+    </div>
+
+    <div class="section-label">路径参数</div>
+    <table class="params">
+      <tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr>
+      <tr><td>task_id</td><td>string</td><td class="required">是</td><td>任务 ID（从 /api/ask 响应获取）</td></tr>
+    </table>
+
+    <div class="section-label">响应体 · StatusResponse</div>
+    <table class="params">
+      <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+      <tr><td>task_id</td><td>string</td><td>任务 ID</td></tr>
+      <tr><td>state</td><td>string</td><td>FSM 状态名，见枚举表</td></tr>
+      <tr><td>data</td><td>object|null</td><td>附加数据（如 revision、session_id）</td></tr>
+    </table>
+
+    <div class="section-label">响应示例</div>
+<pre>{
+  <span class="json-key">"task_id"</span>: <span class="json-str">"task_20260719_001"</span>,
+  <span class="json-key">"state"</span>: <span class="json-str">"GENERATING"</span>,
+  <span class="json-key">"data"</span>: { <span class="json-key">"revision"</span>: <span class="json-num">0</span>, <span class="json-key">"session_id"</span>: <span class="json-str">"sess_abc123"</span> }
+}</pre>
+  </div>
+</div>
+
+<!-- 4. /feedback -->
+<h2 id="feedback">4. 学生反馈</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/api/feedback</span>
+    <span class="tag tag-priority-high">核心</span>
+  </div>
+  <div class="endpoint-body">
+    <p>学生对本次回答的反馈，后端据此更新 Agent 贡献记忆并可能触发延伸路径。</p>
+
+    <div class="section-label">请求体 · FeedbackRequest</div>
+    <table class="params">
+      <tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr>
+      <tr><td>task_id</td><td>string</td><td class="required">是</td><td>任务 ID</td></tr>
+      <tr><td>session_id</td><td>string</td><td class="required">是</td><td>会话 ID</td></tr>
+      <tr><td>agent_id</td><td>string</td><td class="required">是</td><td>被反馈的 Agent ID（从 dispatch_info 获取）</td></tr>
+      <tr><td>function_tag</td><td>string</td><td class="required">是</td><td>功能标签（从 dispatch_info 获取）</td></tr>
+      <tr><td>feedback_type</td><td>string</td><td class="required">是</td><td>反馈类型，见枚举</td></tr>
+      <tr><td>comment</td><td>string|null</td><td class="optional">否</td><td>文字反馈</td></tr>
+    </table>
+
+    <div class="section-label">feedback_type 枚举</div>
+    <div class="enum-list">
+      <span class="enum-item">helpful</span>
+      <span class="enum-item">not_helpful</span>
+      <span class="enum-item">content_error</span>
+      <span class="enum-item">difficulty_mismatch</span>
+    </div>
+
+    <div class="section-label">请求示例</div>
+<pre>{
+  <span class="json-key">"task_id"</span>: <span class="json-str">"task_20260719_001"</span>,
+  <span class="json-key">"session_id"</span>: <span class="json-str">"sess_abc123"</span>,
+  <span class="json-key">"agent_id"</span>: <span class="json-str">"agent_004"</span>,
+  <span class="json-key">"function_tag"</span>: <span class="json-str">"RAG"</span>,
+  <span class="json-key">"feedback_type"</span>: <span class="json-str">"helpful"</span>,
+  <span class="json-key">"comment"</span>: <span class="json-str">"讲得很清楚"</span>
+}</pre>
+
+    <div class="section-label">响应体 · FeedbackResponse</div>
+    <table class="params">
+      <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+      <tr><td>success</td><td>boolean</td><td>是否成功</td></tr>
+      <tr><td>message</td><td>string</td><td>结果描述</td></tr>
+      <tr><td>extension_triggered</td><td>string|null</td><td>触发的延伸路径：recheck / redimension / null</td></tr>
+    </table>
+
+    <div class="callout">
+      <strong>反馈联动：</strong>
+      <ul style="margin: 8px 0 0 20px;">
+        <li><code>helpful</code> → Agent accuracy +0.02</li>
+        <li><code>not_helpful</code> → Agent accuracy -0.02</li>
+        <li><code>content_error</code> → 触发 <strong>RECHECK</strong>（重新核查）</li>
+        <li><code>difficulty_mismatch</code> → 触发 <strong>REDIMENSION</strong>（重新定维，不影响 Agent 评分）</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 5. /quiz_submit -->
+<h2 id="quiz">5. 答题验证</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/api/quiz_submit</span>
+    <span class="tag tag-priority-high">核心</span>
+  </div>
+  <div class="endpoint-body">
+    <p>学生做完资源包里的测试题后提交，后端计算正确率并触发延伸路径。</p>
+
+    <div class="section-label">请求体 · QuizSubmitRequest</div>
+    <table class="params">
+      <tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr>
+      <tr><td>task_id</td><td>string</td><td class="required">是</td><td>任务 ID</td></tr>
+      <tr><td>session_id</td><td>string</td><td class="required">是</td><td>会话 ID</td></tr>
+      <tr><td>answers</td><td>array&lt;object&gt;</td><td class="required">是</td><td>答题结果</td></tr>
+    </table>
+
+    <div class="section-label">answers 元素结构</div>
+    <table class="params">
+      <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+      <tr><td>question</td><td>string</td><td>题目文本</td></tr>
+      <tr><td>user_answer</td><td>string</td><td>学生答案</td></tr>
+      <tr><td>is_correct</td><td>boolean</td><td>是否正确（前端判分后传）</td></tr>
+    </table>
+
+    <div class="section-label">请求示例</div>
+<pre>{
+  <span class="json-key">"task_id"</span>: <span class="json-str">"task_20260719_001"</span>,
+  <span class="json-key">"session_id"</span>: <span class="json-str">"sess_abc123"</span>,
+  <span class="json-key">"answers"</span>: [
+    { <span class="json-key">"question"</span>: <span class="json-str">"RAG 的全称是？"</span>, <span class="json-key">"user_answer"</span>: <span class="json-str">"Retrieval-Augmented Generation"</span>, <span class="json-key">"is_correct"</span>: <span class="json-bool">true</span> },
+    { <span class="json-key">"question"</span>: <span class="json-str">"向量检索用什么相似度？"</span>, <span class="json-key">"user_answer"</span>: <span class="json-str">"欧氏距离"</span>, <span class="json-key">"is_correct"</span>: <span class="json-bool">false</span> }
+  ]
+}</pre>
+
+    <div class="section-label">响应体 · QuizSubmitResponse</div>
+    <table class="params">
+      <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+      <tr><td>task_id</td><td>string</td><td>任务 ID</td></tr>
+      <tr><td>accuracy</td><td>float</td><td>正确率（0.0 ~ 1.0）</td></tr>
+      <tr><td>action</td><td>string</td><td>延伸动作：redimension / advance / recheck</td></tr>
+      <tr><td>new_resources</td><td>object|null</td><td>降维/进阶时生成的新资源包</td></tr>
+      <tr><td>followup_questions</td><td>array&lt;string&gt;|null</td><td>后续推荐问题</td></tr>
+    </table>
+
+    <div class="callout">
+      <strong>正确率联动（方案书 6.1.3）：</strong>
+      <ul style="margin: 8px 0 0 20px;">
+        <li>&lt; 60% → <strong>REDIMENSION</strong>（深度降维）</li>
+        <li>60% ~ 85% → <strong>REDIMENSION</strong>（轻度降维）</li>
+        <li>≥ 85% → <strong>ADVANCE</strong>（进阶挑战）</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 6. 知识库 -->
+<h2 id="kb">6. 知识库接口（调试用）</h2>
+
+<p style="color:#8b949e;font-size:13px;margin-bottom:16px;">这 4 个接口主要给知识库团队和运维用，前端一般不需要对接。如果前端要做"知识库管理面板"可以对接。</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/api/kb/health</span>
+    <span class="tag tag-debug">调试</span>
+  </div>
+  <div class="endpoint-body">
+    <p>知识库健康检查：返回当前后端模式（numpy/chromadb/stub）、chunk 总数、依赖状态。</p>
+    <div class="section-label">响应示例</div>
+<pre>{
+  <span class="json-key">"mode"</span>: <span class="json-str">"numpy"</span>,
+  <span class="json-key">"total_chunks"</span>: <span class="json-num">34154</span>,
+  <span class="json-key">"embedding_model"</span>: <span class="json-str">"bge-m3"</span>,
+  <span class="json-key">"healthy"</span>: <span class="json-bool">true</span>
+}</pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/api/kb/import</span>
+    <span class="tag tag-debug">调试</span>
+  </div>
+  <div class="endpoint-body">
+    <p>导入文档目录（递归导入 .md / .txt / .pdf）。</p>
+    <div class="section-label">请求体</div>
+<pre>{
+  <span class="json-key">"path"</span>: <span class="json-str">"data/raw_docs"</span>,
+  <span class="json-key">"agent_ids"</span>: [<span class="json-str">"agent_004"</span>]  <span class="json-comment">// 可选，不传自动匹配</span>
+}</pre>
+    <div class="section-label">响应</div>
+<pre>{
+  <span class="json-key">"success"</span>: <span class="json-bool">true</span>,
+  <span class="json-key">"imported_count"</span>: <span class="json-num">128</span>,
+  <span class="json-key">"total_chunks"</span>: <span class="json-num">34282</span>,
+  <span class="json-key">"message"</span>: <span class="json-str">"导入完成"</span>
+}</pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/api/kb/import-file</span>
+    <span class="tag tag-debug">调试</span>
+  </div>
+  <div class="endpoint-body">
+    <p>导入单个文件。</p>
+    <div class="section-label">请求体</div>
+<pre>{
+  <span class="json-key">"path"</span>: <span class="json-str">"data/raw_docs/rag_tutorial.md"</span>,
+  <span class="json-key">"agent_ids"</span>: <span class="json-key">null</span>
+}</pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/api/kb/search</span>
+    <span class="tag tag-debug">调试</span>
+  </div>
+  <div class="endpoint-body">
+    <p>检索测试（不经过 LLM，直接看知识库返回什么）。</p>
+    <div class="section-label">Query 参数</div>
+    <table class="params">
+      <tr><th>参数</th><th>类型</th><th>必填</th><th>默认</th><th>说明</th></tr>
+      <tr><td>query</td><td>string</td><td class="required">是</td><td>—</td><td>检索文本</td></tr>
+      <tr><td>top_k</td><td>int</td><td class="optional">否</td><td>3</td><td>返回条数（1~20）</td></tr>
+      <tr><td>score_threshold</td><td>float</td><td class="optional">否</td><td>0.6</td><td>相似度阈值（0.0~1.0）</td></tr>
+      <tr><td>filter_agent</td><td>string</td><td class="optional">否</td><td>—</td><td>按 Agent ID 过滤</td></tr>
+    </table>
+    <div class="section-label">请求示例</div>
+<pre>GET /api/kb/search?query=什么是RAG&amp;top_k=5&amp;filter_agent=agent_004</pre>
+    <div class="section-label">响应</div>
+<pre>{
+  <span class="json-key">"query"</span>: <span class="json-str">"什么是RAG"</span>,
+  <span class="json-key">"results"</span>: [
+    {
+      <span class="json-key">"chunk_id"</span>: <span class="json-str">"rag_001"</span>,
+      <span class="json-key">"content"</span>: <span class="json-str">"RAG 是一种结合检索与生成的技术..."</span>,
+      <span class="json-key">"source"</span>: <span class="json-str">"rag_tutorial.md"</span>,
+      <span class="json-key">"score"</span>: <span class="json-num">0.6832</span>,
+      <span class="json-key">"metadata"</span>: { <span class="json-key">"applicable_agents"</span>: <span class="json-str">"agent_004"</span> }
+    }
+  ],
+  <span class="json-key">"count"</span>: <span class="json-num">1</span>
+}</pre>
+  </div>
+</div>
+
+<!-- 7. WebSocket -->
+<h2 id="ws">7. WebSocket — FSM 实时状态推送</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-ws">WS</span>
+    <span class="path">/ws/{task_id}</span>
+    <span class="tag tag-priority-high">核心</span>
+  </div>
+  <div class="endpoint-body">
+    <p>前端连接后，编排器每次 FSM 状态变更都会推送消息。用于实时展示"当前 FSM 状态：XXX"。</p>
+
+    <div class="section-label">连接 URL</div>
+<pre>ws://localhost:8000/ws/task_20260719_001</pre>
+
+    <div class="section-label">前端连接示例（JS）</div>
+<pre>const taskId = <span class="json-str">"task_20260719_001"</span>;
+const ws = new WebSocket(<span class="json-str">`ws://localhost:8000/ws/${taskId}`</span>);
+
+ws.onmessage = (event) =&gt; {
+  const msg = JSON.parse(event.data);
+  console.log(<span class="json-str">"收到状态:"</span>, msg.state);
+  <span class="json-comment">// 更新 UI 显示当前 FSM 状态</span>
+};
+
+ws.onclose = () =&gt; console.log(<span class="json-str">"WebSocket 断开"</span>);</pre>
+
+    <div class="section-label">推送消息格式</div>
+<pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"fsm_state"</span>,
+  <span class="json-key">"task_id"</span>: <span class="json-str">"task_20260719_001"</span>,
+  <span class="json-key">"state"</span>: <span class="json-str">"GENERATING"</span>,
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"profile"</span>: { <span class="json-comment">/* 学情画像，PROFILING 阶段才有 */</span> }
+  }
+}</pre>
+
+    <div class="callout">
+      <strong>消息字段说明：</strong>
+      <ul style="margin: 8px 0 0 20px;">
+        <li><code>type</code>：消息类型，目前只有 <code>"fsm_state"</code>，后续可能扩展</li>
+        <li><code>state</code>：FSM 状态名，见下方枚举表</li>
+        <li><code>data</code>：附加数据，不同状态携带不同内容（如 PROFILING 携带 profile）</li>
+      </ul>
+    </div>
+
+    <div class="callout callout-warn">
+      <strong>断线重连：</strong>WebSocket 不可用时降级到 <code>GET /api/status/{task_id}</code> 轮询（建议 1s 一次）。
+    </div>
+  </div>
+</div>
+
+<!-- 8. 枚举 -->
+<h2 id="enums">8. 枚举值参考</h2>
+
+<h3>FSM 状态（state 字段）</h3>
+<table class="params">
+  <tr><th>状态</th><th>中文</th><th>说明</th></tr>
+  <tr><td>PROFILING</td><td>学情诊断</td><td>分析学生画像</td></tr>
+  <tr><td>DISPATCHING</td><td>调度</td><td>选择领域 Agent</td></tr>
+  <tr><td>GENERATING</td><td>生成</td><td>Agent 生成候选答案</td></tr>
+  <tr><td>REVIEWING</td><td>审核</td><td>Verifier 事实核查</td></tr>
+  <tr><td>FOCUSING</td><td>聚焦</td><td>聚合多 Agent 输出</td></tr>
+  <tr><td>JUDGING</td><td>裁判</td><td>裁判团裁决</td></tr>
+  <tr><td>FORMATTING</td><td>格式化</td><td>生成资源包</td></tr>
+  <tr><td>COMPLETE</td><td>完成</td><td>流程结束</td></tr>
+  <tr><td>UNKNOWN</td><td>未知</td><td>任务不存在或服务重启</td></tr>
+  <tr><td>RECHECK</td><td>重新核查</td><td>延伸路径（content_error 触发）</td></tr>
+  <tr><td>REDIMENSION</td><td>重新定维</td><td>延伸路径（difficulty_mismatch / 低正确率）</td></tr>
+  <tr><td>ADVANCE</td><td>进阶</td><td>延伸路径（高正确率）</td></tr>
+</table>
+
+<h3>学情画像字段（profile）</h3>
+<table class="params">
+  <tr><th>字段</th><th>枚举值</th></tr>
+  <tr><td>knowledge_level</td><td>beginner / intermediate / advanced</td></tr>
+  <tr><td>background</td><td>cs_student / developer / researcher / product_manager</td></tr>
+  <tr><td>current_goal</td><td>learn_basics / build_project / deploy / debug / research</td></tr>
+</table>
+
+<h3>领域标签（domain_hint / function_tag）</h3>
+<div class="enum-list">
+  <span class="enum-item">LLM基础</span>
+  <span class="enum-item">Prompt工程</span>
+  <span class="enum-item">LangChain</span>
+  <span class="enum-item">RAG</span>
+  <span class="enum-item">HuggingFace</span>
+  <span class="enum-item">模型微调</span>
+  <span class="enum-item">向量数据库</span>
+  <span class="enum-item">Agent框架</span>
+  <span class="enum-item">项目部署</span>
+  <span class="enum-item">代码调试</span>
+</div>
+
+<h3>Agent ID 映射</h3>
+<table class="params">
+  <tr><th>Agent ID</th><th>领域</th><th>Agent 名称</th></tr>
+  <tr><td>agent_001</td><td>LLM基础</td><td>LLM基础Agent</td></tr>
+  <tr><td>agent_002</td><td>Prompt工程</td><td>Prompt工程Agent</td></tr>
+  <tr><td>agent_003</td><td>LangChain</td><td>LangChain组件Agent</td></tr>
+  <tr><td>agent_004</td><td>RAG</td><td>RAG架构Agent</td></tr>
+  <tr><td>agent_005</td><td>HuggingFace</td><td>HuggingFace调用Agent</td></tr>
+  <tr><td>agent_006</td><td>模型微调</td><td>模型微调Agent</td></tr>
+  <tr><td>agent_007</td><td>向量数据库</td><td>向量数据库Agent</td></tr>
+  <tr><td>agent_008</td><td>Agent框架</td><td>Agent框架Agent</td></tr>
+  <tr><td>agent_009</td><td>项目部署</td><td>项目实战Agent</td></tr>
+  <tr><td>agent_010</td><td>代码调试</td><td>代码调试Agent</td></tr>
+</table>
+
+<!-- 9. 前端调用流程 -->
+<h2 id="flow">9. 前端调用流程（推荐）</h2>
+
+<div class="callout">
+  <strong>典型一次提问的完整调用链：</strong>
+</div>
+
+<pre><span class="json-comment">// 1. 学生提问</span>
+POST /api/ask  { question, session_id, history }
+  → 立即返回 { task_id, ... }
+
+<span class="json-comment">// 2. 用 task_id 订阅 WebSocket 接收实时状态</span>
+new WebSocket(`ws://localhost:8000/ws/${taskId}`)
+  → 持续收到 { type: "fsm_state", state: "PROFILING" → "GENERATING" → ... → "COMPLETE" }
+
+<span class="json-comment">// 3. （可选）轮询备用</span>
+GET /api/status/{task_id}  <span class="json-comment">// WebSocket 断线时用</span>
+
+<span class="json-comment">// 4. 学生做资源包里的测试题后提交</span>
+POST /api/quiz_submit  { task_id, session_id, answers }
+  → 返回 { accuracy, action: "redimension" | "advance" }
+
+<span class="json-comment">// 5. 学生对回答反馈</span>
+POST /api/feedback  { task_id, session_id, agent_id, function_tag, feedback_type }
+  → 返回 { success, extension_triggered }</pre>
+
+<div class="callout callout-warn">
+  <strong>前端注意事项：</strong>
+  <ol style="margin: 8px 0 0 20px;">
+    <li><code>/api/ask</code> 响应时间较长（20~38s），前端必须有 loading 动画 + WebSocket 实时状态展示</li>
+    <li><code>session_id</code> 前端自己生成（UUID 即可），同一会话内保持不变</li>
+    <li><code>history</code> 前端维护，每次提问带上前几轮对话（建议最近 5 轮）</li>
+    <li>响应里 <code>clarification_options</code> 非 null 时，问题模糊，前端弹出让用户选</li>
+    <li>响应里 <code>error</code> 非 null 时，展示错误信息 + 重试按钮</li>
+    <li><code>disclaimer</code> 字段必须展示在 AI 回答下方（合规要求）</li>
+    <li><code>from_cache</code> 为 true 时响应极快，可标注"缓存命中"</li>
+  </ol>
+</div>
+
+<div class="footer">
+  wolegedou 后端接口文档 · 前端对接版 · 生成于 2026-07-21
+</div>
+
+</div>
+</body>
+</html>

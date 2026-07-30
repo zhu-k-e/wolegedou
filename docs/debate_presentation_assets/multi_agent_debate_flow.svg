@@ -1,0 +1,279 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" font-family="'Microsoft YaHei', 'Noto Sans SC', sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f0f4ff"/>
+      <stop offset="100%" stop-color="#e8edf5"/>
+    </linearGradient>
+    <!-- 状态节点渐变 -->
+    <linearGradient id="node-prof" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="node-disp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="node-gen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#0891b2"/>
+    </linearGradient>
+    <linearGradient id="node-rev" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="node-foc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="node-judge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="100%" stop-color="#dc2626"/>
+    </linearGradient>
+    <linearGradient id="node-form" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#14b8a6"/>
+      <stop offset="100%" stop-color="#0d9488"/>
+    </linearGradient>
+    <linearGradient id="node-comp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#64748b"/>
+      <stop offset="100%" stop-color="#475569"/>
+    </linearGradient>
+    <!-- 箭头 -->
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#ef4444"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#10b981"/>
+    </marker>
+    <!-- 阴影 -->
+    <filter id="shadow" x="-5%" y="-5%" width="115%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15"/>
+    </filter>
+    <filter id="shadow-heavy" x="-5%" y="-5%" width="115%" height="115%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="1200" height="900" fill="url(#bg)" rx="12"/>
+
+  <!-- 标题 -->
+  <text x="600" y="36" text-anchor="middle" font-size="20" font-weight="bold" fill="#1e293b">多 Agent 辩论裁判协同流程</text>
+  <text x="600" y="56" text-anchor="middle" font-size="11" fill="#64748b">基于「揭榜挂帅·多智能体协同决策系统」v7.0</text>
+
+  <!-- ============ 顶层：主流程（8个FSM状态） ============ -->
+  <g id="main-flow">
+    <!-- 1. PROFILING -->
+    <rect x="50" y="85" width="110" height="44" rx="22" fill="url(#node-prof)" filter="url(#shadow)"/>
+    <text x="105" y="112" text-anchor="middle" font-size="12" fill="white" font-weight="bold">📋 PROFILING</text>
+    <text x="105" y="100" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.7)">学情诊断</text>
+
+    <line x1="160" y1="107" x2="195" y2="107" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- 2. DISPATCHING -->
+    <rect x="200" y="85" width="110" height="44" rx="22" fill="url(#node-disp)" filter="url(#shadow)"/>
+    <text x="255" y="112" text-anchor="middle" font-size="12" fill="white" font-weight="bold">🔀 DISPATCHING</text>
+    <text x="255" y="100" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.7)">调度与匹配</text>
+
+    <line x1="310" y1="107" x2="345" y2="107" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- 3. GENERATING -->
+    <rect x="350" y="85" width="110" height="44" rx="22" fill="url(#node-gen)" filter="url(#shadow)"/>
+    <text x="405" y="112" text-anchor="middle" font-size="12" fill="white" font-weight="bold">✍️ GENERATING</text>
+    <text x="405" y="100" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.7)">候选生成</text>
+
+    <line x1="460" y1="107" x2="495" y2="107" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- 4. REVIEWING -->
+    <rect x="500" y="85" width="110" height="44" rx="22" fill="url(#node-rev)" filter="url(#shadow)"/>
+    <text x="555" y="112" text-anchor="middle" font-size="12" fill="white" font-weight="bold">🔍 REVIEWING</text>
+    <text x="555" y="100" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.7)">审核团队</text>
+
+    <line x1="610" y1="107" x2="645" y2="107" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- 5. FOCUSING -->
+    <rect x="650" y="85" width="110" height="44" rx="22" fill="url(#node-foc)" filter="url(#shadow)"/>
+    <text x="705" y="112" text-anchor="middle" font-size="12" fill="white" font-weight="bold">🎯 FOCUSING</text>
+    <text x="705" y="100" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.7)">聚焦融合</text>
+
+    <line x1="760" y1="107" x2="795" y2="107" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- 6. JUDGING -->
+    <rect x="800" y="85" width="110" height="44" rx="22" fill="url(#node-judge)" filter="url(#shadow-heavy)"/>
+    <text x="855" y="112" text-anchor="middle" font-size="12" fill="white" font-weight="bold">⚖️ JUDGING</text>
+    <text x="855" y="100" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.7)">裁判团裁决</text>
+
+    <line x1="910" y1="107" x2="945" y2="107" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- 7. FORMATTING -->
+    <rect x="950" y="85" width="110" height="44" rx="22" fill="url(#node-form)" filter="url(#shadow)"/>
+    <text x="1005" y="112" text-anchor="middle" font-size="12" fill="white" font-weight="bold">📦 FORMATTING</text>
+    <text x="1005" y="100" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.7)">资源生成</text>
+
+    <line x1="1060" y1="107" x2="1095" y2="107" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <!-- 8. COMPLETE -->
+    <rect x="1100" y="85" width="80" height="44" rx="22" fill="url(#node-comp)" filter="url(#shadow)"/>
+    <text x="1140" y="112" text-anchor="middle" font-size="12" fill="white" font-weight="bold">✅ COMPLETE</text>
+  </g>
+
+  <!-- ============ 第二层：裁判团内部结构 ============ -->
+  <rect x="50" y="165" width="1130" height="340" rx="12" fill="white" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="6,3" filter="url(#shadow)"/>
+  <text x="615" y="185" text-anchor="middle" font-size="13" fill="#dc2626" font-weight="bold">⚖️ JUDGING 阶段详解 — 3人裁判团 + 候选辩论机制</text>
+
+  <!-- 子标题 -->
+  <text x="160" y="210" text-anchor="middle" font-size="11" fill="#475569" font-weight="bold">平行独立审查</text>
+  <text x="420" y="210" text-anchor="middle" font-size="11" fill="#475569" font-weight="bold">分歧解决（DISSENT_RESOLVE）</text>
+  <text x="700" y="210" text-anchor="middle" font-size="11" fill="#475569" font-weight="bold">终审门控</text>
+  <text x="980" y="210" text-anchor="middle" font-size="11" fill="#475569" font-weight="bold">溯源标注</text>
+
+  <!-- 虚线列分隔 -->
+  <line x1="310" y1="205" x2="310" y2="495" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="565" y1="205" x2="565" y2="495" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="830" y1="205" x2="830" y2="495" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- === 列1：3位裁判 === -->
+  <!-- 裁判1：Fact -->
+  <rect x="75" y="225" width="210" height="90" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="180" y="248" text-anchor="middle" font-size="13" fill="#dc2626" font-weight="bold">👤 裁判1 | 事实审查</text>
+  <text x="180" y="268" text-anchor="middle" font-size="10" fill="#64748b">Fact Judge（知识库对照专家）</text>
+  <text x="180" y="288" text-anchor="middle" font-size="9" fill="#94a3b8">校验知识引用真实性</text>
+  <text x="180" y="303" text-anchor="middle" font-size="9" fill="#94a3b8">检查事实准确率 + 证据链</text>
+
+  <!-- 裁判2：Logic -->
+  <rect x="75" y="325" width="210" height="90" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="180" y="348" text-anchor="middle" font-size="13" fill="#16a34a" font-weight="bold">👤 裁判2 | 逻辑审查</text>
+  <text x="180" y="368" text-anchor="middle" font-size="10" fill="#64748b">Logic Judge（推理链完整性专家）</text>
+  <text x="180" y="388" text-anchor="middle" font-size="9" fill="#94a3b8">检查推理步骤间有无跳跃</text>
+  <text x="180" y="403" text-anchor="middle" font-size="9" fill="#94a3b8">检查结论是否被前提支持</text>
+
+  <!-- 裁判3：Applicability -->
+  <rect x="75" y="425" width="210" height="90" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="180" y="448" text-anchor="middle" font-size="13" fill="#2563eb" font-weight="bold">👤 裁判3 | 适用性审查</text>
+  <text x="180" y="468" text-anchor="middle" font-size="10" fill="#64748b">Applicability Judge（学生适配专家）</text>
+  <text x="180" y="488" text-anchor="middle" font-size="9" fill="#94a3b8">难度匹配 + 背景适配</text>
+  <text x="180" y="503" text-anchor="middle" font-size="9" fill="#94a3b8">目标方向对齐</text>
+
+  <!-- === 列2：分歧解决状态机 === -->
+  <rect x="340" y="225" width="200" height="120" rx="10" fill="#fdf2f8" stroke="#ec4899" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="440" y="248" text-anchor="middle" font-size="12" fill="#be185d" font-weight="bold">🔁 2:1 分歧 → DISSENT_RESOLVE</text>
+  <line x1="355" y1="258" x2="525" y2="258" stroke="#fbcfe8" stroke-width="1"/>
+  <text x="440" y="278" text-anchor="middle" font-size="10" fill="#475569">① 少数方举证</text>
+  <text x="440" y="298" text-anchor="middle" font-size="10" fill="#475569">② 多数方回应（接受/反驳）</text>
+  <text x="440" y="318" text-anchor="middle" font-size="10" fill="#475569">③ 僵持→裁判长终裁</text>
+  <text x="440" y="338" text-anchor="middle" font-size="10" fill="#475569">④ 候选Agent辩论（追加）</text>
+
+  <!-- 候选辩论子框 -->
+  <rect x="340" y="365" width="200" height="150" rx="10" fill="#fefce8" stroke="#eab308" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="440" y="388" text-anchor="middle" font-size="11" fill="#a16207" font-weight="bold">🗣️ 候选Agent辩论</text>
+  <line x1="355" y1="395" x2="525" y2="395" stroke="#fef08a" stroke-width="1"/>
+  <text x="440" y="415" text-anchor="middle" font-size="10" fill="#475569">落选候选: 为何落选方更好?</text>
+  <text x="440" y="435" text-anchor="middle" font-size="10" fill="#475569">获胜候选: 辩护 + 反驳质疑</text>
+  <text x="440" y="465" text-anchor="middle" font-size="9" fill="#94a3b8">机制：辩论改变裁决结果</text>
+  <text x="440" y="483" text-anchor="middle" font-size="9" fill="#94a3b8">（Passed→Revise 概率约30%）</text>
+
+  <!-- N-O 辩论流向箭头 -->
+  <path d="M440,345 L440,363" stroke="#ec4899" stroke-width="1.5" marker-end="url(#arrow-red)" fill="none"/>
+
+  <!-- === 列3：终审门控 === -->
+  <rect x="595" y="225" width="210" height="100" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="700" y="248" text-anchor="middle" font-size="11" fill="#6d28d9" font-weight="bold">🛡️ 反向怀疑 (Reverse Suspicion)</text>
+  <line x1="610" y1="256" x2="790" y2="256" stroke="#ddd6fe" stroke-width="1"/>
+  <text x="700" y="278" text-anchor="middle" font-size="10" fill="#475569">复杂输出(≥5 refs / ≥20行代码 / ≥8步推理)</text>
+  <text x="700" y="298" text-anchor="middle" font-size="10" fill="#475569">→ 注入严格审查指令</text>
+  <text x="700" y="318" text-anchor="middle" font-size="10" fill="#475569">→ 溯源验证率必须 100% 否则降级</text>
+
+  <rect x="595" y="340" width="210" height="100" rx="10" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="700" y="363" text-anchor="middle" font-size="11" fill="#be123c" font-weight="bold">⚡ 0:3 全票失败终审门控</text>
+  <line x1="610" y1="371" x2="790" y2="371" stroke="#fecdd3" stroke-width="1"/>
+  <text x="700" y="393" text-anchor="middle" font-size="10" fill="#475569">裁判长终审: 是否达到最低可接受标准?</text>
+  <text x="700" y="413" text-anchor="middle" font-size="10" fill="#475569">是→LowConfPassed; 否→强制放行标记</text>
+  <text x="700" y="433" text-anchor="middle" font-size="9" fill="#94a3b8">（强制放行率期望 &lt;5%，防止"沉默误判"）</text>
+
+  <!-- 审核快速通道: 放在终审门控下方 -->
+  <rect x="595" y="455" width="210" height="60" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="700" y="478" text-anchor="middle" font-size="11" fill="#047857" font-weight="bold">⚡ 快速通道</text>
+  <text x="700" y="498" text-anchor="middle" font-size="10" fill="#475569">审核全票一致(分差&lt;0.05) → 仅溯源标注</text>
+
+  <!-- === 列4：溯源标注 === -->
+  <rect x="860" y="225" width="300" height="160" rx="10" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="1010" y="248" text-anchor="middle" font-size="12" fill="#0369a1" font-weight="bold">📎 高保真溯源标注</text>
+  <line x1="875" y1="256" x2="1145" y2="256" stroke="#bae6fd" stroke-width="1"/>
+  <text x="1010" y="278" text-anchor="middle" font-size="10" fill="#475569">提取 3 类事实声明：</text>
+  <text x="880" y="300" font-size="10" fill="#64748b">• knowledge_refs 中的显式引用（N条）</text>
+  <text x="880" y="320" font-size="10" fill="#64748b">• conclusion 中的事实结论（1条）</text>
+  <text x="880" y="340" font-size="10" fill="#64748b">• reasoning_steps 中的推理声明（M条）</text>
+  <text x="1010" y="370" text-anchor="middle" font-size="10" fill="#0369a1" font-weight="bold">verification_rate = 已溯源 / 总声明</text>
+
+  <rect x="860" y="400" width="300" height="115" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="1010" y="422" text-anchor="middle" font-size="11" fill="#475569" font-weight="bold">📋 裁决产出</text>
+  <line x1="875" y1="430" x2="1145" y2="430" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="880" y="450" font-size="10" fill="#64748b">1. JudgeVerdict: passed/revise/low_confidence/failed</text>
+  <text x="880" y="470" font-size="10" fill="#64748b">2. DissentResolution: 分歧解决完整记录</text>
+  <text x="880" y="490" font-size="10" fill="#64748b">3. CandidateDebate: 辩论证据</text>
+  <text x="880" y="510" font-size="10" fill="#64748b">4. Traceability: N条溯源 + 验证率</text>
+
+  <!-- ============ 底部：防幻觉层级 ============ -->
+  <rect x="50" y="530" width="1130" height="120" rx="12" fill="white" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="615" y="552" text-anchor="middle" font-size="13" fill="#1d4ed8" font-weight="bold">🛡️ 完整防幻觉链路</text>
+
+  <!-- 5道防线 -->
+  <rect x="75" y="570" width="190" height="60" rx="8" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+  <text x="170" y="593" text-anchor="middle" font-size="11" fill="#15803d" font-weight="bold">① RAG 知识库检索</text>
+  <text x="170" y="613" text-anchor="middle" font-size="9" fill="#6b7280">中英文34154chunk双路召回</text>
+
+  <line x1="265" y1="600" x2="280" y2="600" stroke="#22c55e" stroke-width="1.5"/>
+
+  <rect x="285" y="570" width="190" height="60" rx="8" fill="#fefce8" stroke="#fde68a" stroke-width="1"/>
+  <text x="380" y="593" text-anchor="middle" font-size="11" fill="#a16207" font-weight="bold">② 领域Agent自评估</text>
+  <text x="380" y="613" text-anchor="middle" font-size="9" fill="#6b7280">双低自信分(置信&lt;0.6+知识含&lt;0.5)触发RAG</text>
+
+  <line x1="475" y1="600" x2="490" y2="600" stroke="#f59e0b" stroke-width="1.5"/>
+
+  <rect x="495" y="570" width="190" height="60" rx="8" fill="#fff7ed" stroke="#fed7aa" stroke-width="1"/>
+  <text x="590" y="593" text-anchor="middle" font-size="11" fill="#c2410c" font-weight="bold">③ 审核团队3角色</text>
+  <text x="590" y="613" text-anchor="middle" font-size="9" fill="#6b7280">Verifier+Skeptic+Evaluator评分</text>
+
+  <line x1="685" y1="600" x2="700" y2="600" stroke="#ea580c" stroke-width="1.5"/>
+
+  <rect x="705" y="570" width="190" height="60" rx="8" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="800" y="593" text-anchor="middle" font-size="11" fill="#b91c1c" font-weight="bold">④ 裁判团辩论裁决</text>
+  <text x="800" y="613" text-anchor="middle" font-size="9" fill="#6b7280">3人+分歧解决+候选辩论+终审门控</text>
+
+  <line x1="895" y1="600" x2="910" y2="600" stroke="#dc2626" stroke-width="1.5"/>
+
+  <rect x="915" y="570" width="190" height="60" rx="8" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1"/>
+  <text x="1010" y="593" text-anchor="middle" font-size="11" fill="#6d28d9" font-weight="bold">⑤ 代码安全检查</text>
+  <text x="1010" y="613" text-anchor="middle" font-size="9" fill="#6b7280">AST静态分析+危险调用拦截</text>
+
+  <!-- ============ 底部：指标卡 ============ -->
+  <rect x="50" y="675" width="1130" height="90" rx="12" fill="white" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+
+  <rect x="80" y="690" width="230" height="60" rx="8" fill="#f0fdf4"/>
+  <text x="195" y="714" text-anchor="middle" font-size="18" fill="#16a34a" font-weight="bold">≥90%</text>
+  <text x="195" y="735" text-anchor="middle" font-size="10" fill="#64748b">溯源验证率（审核团队+裁判团）</text>
+
+  <line x1="330" y1="695" x2="330" y2="745" stroke="#e2e8f0" stroke-width="1"/>
+
+  <rect x="350" y="690" width="230" height="60" rx="8" fill="#fefce8"/>
+  <text x="465" y="714" text-anchor="middle" font-size="18" fill="#ca8a04" font-weight="bold">&lt;5%</text>
+  <text x="465" y="735" text-anchor="middle" font-size="10" fill="#64748b">幻觉率（多层级拦截后）</text>
+
+  <line x1="600" y1="695" x2="600" y2="745" stroke="#e2e8f0" stroke-width="1"/>
+
+  <rect x="620" y="690" width="230" height="60" rx="8" fill="#eff6ff"/>
+  <text x="735" y="714" text-anchor="middle" font-size="18" fill="#2563eb" font-weight="bold">≥85%</text>
+  <text x="735" y="735" text-anchor="middle" font-size="10" fill="#64748b">适配准确率（学情画像驱动调度）</text>
+
+  <line x1="870" y1="695" x2="870" y2="745" stroke="#e2e8f0" stroke-width="1"/>
+
+  <rect x="890" y="690" width="210" height="60" rx="8" fill="#f5f3ff"/>
+  <text x="995" y="714" text-anchor="middle" font-size="18" fill="#7c3aed" font-weight="bold">≥90%</text>
+  <text x="995" y="735" text-anchor="middle" font-size="10" fill="#64748b">知识点覆盖率（11个Agent池）</text>
+
+  <!-- ============ 底部版本信息 ============ -->
+  <text x="600" y="800" text-anchor="middle" font-size="9" fill="#94a3b8">系统架构：挑战杯揭榜挂帅 XH-202630 · 方案书 v7.0 终版 · 后端 Python 3.10 + FastAPI</text>
+
+</svg>
