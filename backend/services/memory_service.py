@@ -17,6 +17,14 @@ from backend.db.repositories import config_repo, agent_repo, memory_repo
 class MemoryService:
     """贡献记忆闭环服务"""
 
+    # α阶梯式下降阈值（方案书§2.4.2：冷启动0.9 → 数据积累后0.3）
+    # (总记录数阈值, 对应α值) — 从高到低匹配，命中第一个即停止
+    _ALPHA_STAGES = [
+        (200, 0.3),
+        (100, 0.5),
+        (50, 0.7),
+    ]
+
     def __init__(self):
         settings = get_settings()
         self._ema_smooth = settings.ema_smooth
@@ -155,6 +163,40 @@ class MemoryService:
                 logger.warning(f"Agent {agent_id} 在 {tag} 下被淘汰，进入离线评估队列")
 
     # ============================================================
+    # 2.4.2 α动态切换
+    # ============================================================
+
+    def _check_alpha_adjustment(self):
+        """检查并自动调整α值（方案书§2.4.2）
+
+        α冷启动0.9 → 数据积累后阶梯式下降至0.3：
+          总记录数 ≥ 50  → α=0.7
+          总记录数 ≥ 100 → α=0.5
+          总记录数 ≥ 200 → α=0.3
+
+        每次record_task_completion后调用，仅在实际需要变更时写库。
+        """
+        total_count = agent_repo.get_total_task_count()
+        current_alpha = config_repo.get_alpha()
+
+        # 从高阈值往低匹配，命中第一个即为目标
+        target_alpha = None
+        for threshold, alpha in self._ALPHA_STAGES:
+            if total_count >= threshold:
+                target_alpha = alpha
+                break
+
+        if target_alpha is not None and abs(current_alpha - target_alpha) > 0.01:
+            config_repo.set_alpha(target_alpha)
+            logger.info(
+                f"α自动调整: {current_alpha} → {target_alpha} "
+                f"(总记录数={total_count})"
+            )
+        elif target_alpha is None and current_alpha != 0.9:
+            # 记录数不足50且α不是初始值，恢复冷启动值
+            logger.debug(f"α保持冷启动值: {current_alpha} (总记录数={total_count})")
+
+    # ============================================================
     # 5.7 学生反馈机制
     # ============================================================
 
@@ -171,7 +213,13 @@ class MemoryService:
         helpful → accuracy +0.02
         not_helpful → accuracy -0.02
         content_error → 记录，人工复核
-        difficulty_mismatch → 触发学情画像重新评估（不与Agent表现挂钩）
+        difficulty_mismatch → 保存反馈并在响应中标记，编排器下次生成画像时自动读取
+
+        P0-1修复（方案书§5.7）：
+          - difficulty_mismatch反馈写入student_feedback表
+          - profile_agent.generate_profile()在生成新画像时读取该session的
+            difficulty_mismatch记录，降级knowledge_level
+          - 本方法仅保存 + 打日志 + 返回信号，不直接操作Agent表现
         """
         # 保存反馈记录
         memory_repo.save_student_feedback(
@@ -203,7 +251,13 @@ class MemoryService:
             )
             logger.info(f"内容错误反馈已记录人工复核: {session_id}/{agent_id}")
 
-        # difficulty_mismatch 不在此处理，由编排器触发画像重新评估
+        elif feedback_type == "difficulty_mismatch":
+            # P0-1修复：保存反馈 + 触发signalon（返回信号供orchestrator下一轮使用）
+            logger.info(
+                f"难度不匹配反馈已记录: session={session_id}, "
+                f"comment={comment or '无详细说明'}, "
+                f"下次生成画像时将自动读取并调整knowledge_level"
+            )
 
     # ============================================================
     # 综合更新（一次任务完成后调用）
@@ -261,6 +315,9 @@ class MemoryService:
 
         # 5. 检查淘汰
         self.check_elimination(agent_id)
+
+        # 6. α动态切换检查（方案书§2.4.2）
+        self._check_alpha_adjustment()
 
         logger.info(
             f"贡献记忆已记录: task={task_id}, agent={agent_id}, tag={function_tag}, "

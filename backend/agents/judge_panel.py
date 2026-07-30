@@ -26,6 +26,7 @@ from backend.schemas.judge_verdict import (
     TraceabilityItem,
     VerificationStatus,
 )
+from backend.schemas.review_feedback import ReviewFeedback
 from backend.schemas.student_profile import StudentProfile
 from backend.services.llm_client import ModelTier
 
@@ -145,6 +146,31 @@ class JudgePanel:
             )
         return triggered
 
+    def _check_review_unanimous(self, review_feedback: Optional[ReviewFeedback]) -> bool:
+        """检查审核评分是否全票一致（方案书§8.4.2优化4）
+
+        若获胜候选的3位审核员评分分差<0.05，认为审核全票一致。
+        此场景下裁判团可走快速通道，仅做溯源标注。
+        """
+        if not review_feedback:
+            return False
+        winner = next((c for c in review_feedback.candidates if c.is_winner), None)
+        if not winner:
+            return False
+        scores = [
+            winner.scores.fact_accuracy,
+            winner.scores.logic_completeness,
+            winner.scores.pedagogical_fit,
+        ]
+        score_range = max(scores) - min(scores)
+        unanimous = score_range < 0.05
+        if unanimous:
+            logger.info(
+                f"审核全票一致: V={scores[0]:.2f} S={scores[1]:.2f} E={scores[2]:.2f}, "
+                f"分差={score_range:.3f}<0.05"
+            )
+        return unanimous
+
     async def judge(
         self,
         focused_output: FocusedOutput,
@@ -154,13 +180,41 @@ class JudgePanel:
         losing_candidate: Optional[CandidateOutput] = None,
         losing_agent: Optional[DomainAgent] = None,
         winning_agent: Optional[DomainAgent] = None,
+        review_feedback: Optional[ReviewFeedback] = None,
     ) -> JudgeVerdict:
         """裁判团完整审查流程
 
         状态机：
           REVIEWING → COMPARING → PASSED(3:0) 或 DISSENT_RESOLVE(2:1) → REVISING/PASSED
+
+        快速通道（方案书§8.4.2优化4）：
+          若审核评分全票一致（3人分差<0.05），仅做溯源标注，跳过完整审查。
         """
         import asyncio
+
+        # === 快速通道：审核评分全票一致时仅做溯源标注 ===
+        if self._check_review_unanimous(review_feedback):
+            logger.info("裁判团快速通道: 审核评分全票一致，跳过完整审查")
+            traceability = await self._annotate_traceability(focused_output)
+            verified_count = sum(
+                1 for t in traceability if t.verification_status == VerificationStatus.VERIFIED
+            )
+            overall_rate = verified_count / len(traceability) if traceability else 0.0
+
+            verdict_value = Verdict.PASSED if overall_rate >= 0.9 else Verdict.LOW_CONFIDENCE_PASSED
+
+            return JudgeVerdict(
+                verdict=verdict_value,
+                judges=[JudgeOpinion(
+                    role="快速通道（审核全票一致）",
+                    judgment="pass",
+                    evidence=[],
+                    confidence=0.95,
+                )],
+                dissent_resolution=None,
+                traceability=traceability,
+                overall_verification_rate=overall_rate,
+            )
 
         # === 反向怀疑检测（方案书 4.4.3 节） ===
         strict_mode = self._detect_reverse_suspicion(focused_output)
@@ -184,6 +238,7 @@ class JudgePanel:
         if pass_count == 3:
             verdict_value = Verdict.PASSED
             dissent_resolution = None
+            override_reason = None
         # 2:1 分歧
         elif pass_count == 2:
             verdict_value, dissent_resolution = await self._resolve_dissent(
@@ -191,10 +246,18 @@ class JudgePanel:
                 winning_candidate, losing_candidate,
                 losing_agent, winning_agent,
             )
-        # 1:2 或 0:3 未通过
-        else:
-            verdict_value = Verdict.FAILED if fail_count == 3 else Verdict.REVISE
+            override_reason = None
+        # 0:3 全票失败 → 裁判长终审门控（方案书4.4.2延伸：0:3状态机未定义）
+        elif fail_count == 3:
+            verdict_value, override_reason = await self._final_review_on_unanimous_fail(
+                focused_output, profile, judges
+            )
             dissent_resolution = None
+        # 1:2 未通过
+        else:
+            verdict_value = Verdict.REVISE
+            dissent_resolution = None
+            override_reason = None
 
         # === 溯源标注（裁判1执行） ===
         traceability = await self._annotate_traceability(focused_output)
@@ -214,6 +277,7 @@ class JudgePanel:
             dissent_resolution=dissent_resolution,
             traceability=traceability,
             overall_verification_rate=overall_rate,
+            override_reason=override_reason,
         )
 
     async def _judge_single(
@@ -246,7 +310,9 @@ class JudgePanel:
         )
 
         raw = await judge.generate(user_prompt, tier=ModelTier.HIGH, temperature=0.0)
-        data = json.loads(raw)
+        data = await judge.parse_json_safe(raw)
+        if data is None:
+            data = {"verdict": "failed", "confidence": 0.3, "issues": []}
 
         # 将 LLM 返回的 verdict 归一化为 pass / fail 二元判断
         raw_verdict = data.get("verdict", "failed")
@@ -371,7 +437,9 @@ class JudgePanel:
         raw = await self.judge_logic.generate(
             user_prompt, tier=ModelTier.HIGH, temperature=0.0
         )
-        data = json.loads(raw)
+        data = await self.judge_logic.parse_json_safe(raw)
+        if data is None:
+            data = {"response": "rejected", "reasoning": ["JSON解析失败，默认反驳"]}
         response = data.get("response", "rejected")
         reasoning = [_safe_str(r) for r in data.get("reasoning", [])]
 
@@ -404,7 +472,9 @@ class JudgePanel:
         raw = await self.judge_fact.generate(
             user_prompt, tier=ModelTier.HIGH, temperature=0.0
         )
-        data = json.loads(raw)
+        data = await self.judge_fact.parse_json_safe(raw)
+        if data is None:
+            data = {"verdict": "passed", "reasoning": "JSON解析失败，默认通过"}
         raw_verdict = data.get("verdict", "passed")
 
         verdict_map = {
@@ -417,30 +487,158 @@ class JudgePanel:
         logger.info(f"裁判长裁决: {verdict}, reasoning={data.get('reasoning', '')}")
         return verdict
 
+    async def _final_review_on_unanimous_fail(
+        self,
+        focused: FocusedOutput,
+        profile: StudentProfile,
+        judges: list[JudgeOpinion],
+    ) -> tuple[Verdict, Optional[str]]:
+        """全票失败终审（方案书4.4.2延伸：0:3状态机未定义的补充处理）
+
+        3名裁判全部不通过时，裁判长做最后一次评估：
+        内容是否达到"最低可接受标准"（不至于完全不能提供给学生）。
+
+        设计意图（用户要求）：
+          全票失败可以放行，但这种情况必须特别少。
+          终审门控确保大部分0:3被挽救（改判），只有终审也确认
+          不行的才强制放行 → 真正的强制放行极少。
+
+        Returns:
+            (verdict, override_reason)
+            - 终审通过 → (LOW_CONFIDENCE_PASSED, None) 挽救成功，正常降级
+            - 终审不通过 → (LOW_CONFIDENCE_PASSED, "unanimous_fail_force_pass")
+                          仍放行（用户要求），但标记强制放行
+        """
+        issues_summary = "; ".join(
+            f"[{j.role}] {'; '.join(j.evidence)}" for j in judges if j.evidence
+        )
+        if not issues_summary:
+            issues_summary = "（裁判未提供具体证据）"
+
+        user_prompt = (
+            f"你是裁判长。3名裁判全部投了不通过（0:3全票失败）。\n\n"
+            f"各裁判的问题证据：\n{issues_summary}\n\n"
+            f"被审查的输出：\n{focused.model_dump_json(indent=2)}\n\n"
+            f"学情画像：\n{profile.model_dump_json(indent=2)}\n\n"
+            f"请做最终评估：虽然3名裁判都不通过，这份输出是否达到了"
+            f"最低可接受标准（即不至于完全不能提供给学生）？\n"
+            f"- 达到最低标准（问题可接受/裁判过于严格）→ pass\n"
+            f"- 未达到最低标准（有严重事实错误/严重不适配）→ fail\n"
+            f"输出JSON: {{\"final_verdict\": \"pass\"或\"fail\", "
+            f"\"reasoning\": \"裁决理由\"}}"
+        )
+
+        raw = await self.judge_fact.generate(
+            user_prompt, tier=ModelTier.HIGH, temperature=0.0
+        )
+        data = await self.judge_fact.parse_json_safe(raw)
+        if data is None:
+            data = {"final_verdict": "fail", "reasoning": "JSON解析失败，默认不通过"}
+
+        final_verdict = data.get("final_verdict", "fail")
+        reasoning = data.get("reasoning", "")
+
+        if final_verdict == "pass":
+            logger.info(
+                f"全票失败终审挽救: 裁判长认为达到最低标准, "
+                f"reasoning={reasoning}"
+            )
+            return Verdict.LOW_CONFIDENCE_PASSED, None
+        else:
+            logger.error(
+                f"⚠️ 全票失败强制放行: 裁判长终审仍不通过, "
+                f"输出质量不达标但按策略放行, reasoning={reasoning}"
+            )
+            return Verdict.LOW_CONFIDENCE_PASSED, "unanimous_fail_force_pass"
+
+    @staticmethod
+    def _extract_factual_statements(focused: FocusedOutput) -> list[dict]:
+        """从聚焦输出中提取需要溯源的关键事实声明
+
+        除了 knowledge_refs 中的显式引用外，conclusion 和
+        reasoning_steps 中也可能包含事实性声明，一并纳入溯源计算。
+
+        每条声明包含：
+          - source: 来源标识（knowledge_ref / conclusion / reasoning_step N）
+          - statement: 实际要验证的文本
+        """
+        statements: list[dict] = []
+        seen: set[str] = set()
+
+        # 1. knowledge_refs 中的显式引用
+        for ref in focused.knowledge_refs:
+            stmt = ref.content_summary.strip()
+            if stmt and stmt not in seen:
+                seen.add(stmt)
+                statements.append({
+                    "source": ref.source,
+                    "statement": stmt,
+                    "category": "knowledge_ref",
+                })
+
+        # 2. conclusion 中的事实声明
+        if focused.conclusion:
+            stmt = focused.conclusion.strip()
+            if stmt and stmt not in seen:
+                seen.add(stmt)
+                statements.append({
+                    "source": "conclusion",
+                    "statement": stmt,
+                    "category": "conclusion",
+                })
+
+        # 3. reasoning_steps 中的关键事实声明
+        for i, step in enumerate(focused.reasoning_steps, start=1):
+            stmt = step.strip()
+            if stmt and stmt not in seen:
+                seen.add(stmt)
+                statements.append({
+                    "source": f"reasoning_step_{i}",
+                    "statement": stmt,
+                    "category": "reasoning_step",
+                })
+
+        return statements
+
     async def _annotate_traceability(
         self, focused: FocusedOutput
     ) -> list[TraceabilityItem]:
         """高保真知识溯源标注
 
-        对应方案书 4.4.4 节：裁判1对每条knowledge_refs验证来源
+        对应方案书 4.4.4 节：综合对 knowledge_refs + conclusion +
+        reasoning_steps 中的关键事实声明做溯源，按"已溯源条数 / 总声明数"
+        计算 verification_rate。
+        这样讲义多步推理不再只溯源 1 条。
         """
-        items = []
-        for ref in focused.knowledge_refs:
-            result = await self.judge_fact._kb.verify_statement(ref.content_summary)
+        statements = self._extract_factual_statements(focused)
+        if not statements:
+            return []
+
+        items: list[TraceabilityItem] = []
+        for entry in statements:
+            result = await self.judge_fact._kb.verify_statement(entry["statement"])
 
             status_map = {
                 "已验证": VerificationStatus.VERIFIED,
                 "矛盾": VerificationStatus.CONTRADICTED,
                 "待验证": VerificationStatus.UNVERIFIED,
             }
-            status = status_map.get(result.get("status", "待验证"), VerificationStatus.UNVERIFIED)
+            status = status_map.get(
+                result.get("status", "待验证"), VerificationStatus.UNVERIFIED
+            )
 
             items.append(TraceabilityItem(
-                statement=ref.content_summary,
-                source=result.get("source", ref.source),
+                statement=entry["statement"][:200],
+                source=result.get("source", entry["source"]),
                 verification_status=status,
             ))
 
+        logger.debug(
+            f"[JudgePanel] 溯源标注: {len(statements)} 条声明"
+            f"(knowledge_refs={len(focused.knowledge_refs)}, "
+            f"conclusion=1, reasoning_steps={len(focused.reasoning_steps)}), "
+            f"已验证={sum(1 for i in items if i.verification_status==VerificationStatus.VERIFIED)}"
+        )
         return items
 
     async def recheck(
@@ -460,4 +658,5 @@ class JudgePanel:
         )
 
         raw = await self.judge_fact.generate(user_prompt, tier=ModelTier.HIGH, temperature=0.0)
-        return json.loads(raw)
+        data = await self.judge_fact.parse_json_safe(raw)
+        return data if data else {"has_error": False, "error_detail": "", "corrected_content": ""}

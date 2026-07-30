@@ -113,12 +113,22 @@ class Orchestrator:
             # 缓存上下文供延伸路径使用
             self._task_contexts[task_id] = ctx
 
+            # 第七部分量化指标：提取审核评分均值 + 知识引用数
+            review_summary = self._extract_review_summary(ctx)
+            knowledge_refs_count = (
+                len(ctx.merged_focused_output.knowledge_refs)
+                if ctx.merged_focused_output
+                else sum(len(fo.knowledge_refs) for fo in ctx.focused_outputs)
+            )
+
             return {
                 "task_id": task_id,
                 "session_id": session_id,
                 "profile": ctx.profile.model_dump() if ctx.profile else None,
                 "resource_package": ctx.resource_package.model_dump() if ctx.resource_package else None,
                 "judge_verdict": ctx.judge_verdict.model_dump() if ctx.judge_verdict else None,
+                "review_summary": review_summary,
+                "knowledge_refs_count": knowledge_refs_count,
                 "dispatch_info": {
                     "intent": ctx.dispatch_result.intent.value if ctx.dispatch_result else None,
                     "segments": [
@@ -192,7 +202,8 @@ class Orchestrator:
                     ctx.revision_count += 1
                     await self._transition(ctx, FSMState.REVISING)
                 else:
-                    # 超过修改上限或FAILED → 强制通过
+                    # REVISE超过修改上限或FAILED → 降级强制通过（方案书4.4.2第1366行）
+                    self._force_pass_with_override(ctx, verdict.verdict)
                     await self._transition(ctx, FSMState.FORMATTING)
 
             elif ctx.current_state == FSMState.REVISING:
@@ -212,13 +223,33 @@ class Orchestrator:
     # ============================================================
 
     async def _do_profiling(self, ctx: TaskContext):
-        """PROFILING: 学情画像生成"""
+        """PROFILING: 学情画像生成
+
+        降级策略（方案书§8.5.3）：LLM调用失败时使用默认画像，不中断主流程。
+        """
         await ws_manager.push_state(ctx.task_id, FSMState.PROFILING.value)
-        ctx.profile = await self.profile_agent.generate_profile(
-            question=ctx.question,
-            session_id=ctx.session_id,
-            history=ctx.history,
-        )
+        try:
+            ctx.profile = await self.profile_agent.generate_profile(
+                question=ctx.question,
+                session_id=ctx.session_id,
+                history=ctx.history,
+            )
+        except Exception as e:
+            logger.warning(f"学情诊断失败，降级为默认画像: {e}")
+            from backend.schemas.student_profile import (
+                KnowledgeLevel, Background, CurrentGoal,
+                QuestionType, ComplexityEstimate,
+            )
+            ctx.profile = StudentProfile(
+                knowledge_level=KnowledgeLevel.ENTRY,
+                background=Background.SCIENCE_NO_CODE,
+                current_goal=CurrentGoal.QUICK_START,
+                question_type=QuestionType.CONCEPT,
+                domain_hint=[],
+                complexity_estimate=ComplexityEstimate.SINGLE_DOMAIN,
+                intent_type=IntentType.GENERATION,
+                session_id=ctx.session_id,
+            )
         await ws_manager.push_state(
             ctx.task_id, FSMState.PROFILING.value,
             {"profile": ctx.profile.model_dump()},
@@ -268,6 +299,7 @@ class Orchestrator:
 
         # P1-1: 候选自评估双低触发RAG增强（方案书§3.4.4 DyLAN落地）
         # 如果两个候选的self_confidence都<0.5 → 触发知识库RAG增强
+        # 对应方案书 6.6 节：每个 Agent 只检索自己分类下的 chunk（filter_agent）
         from backend.services.knowledge_base import get_knowledge_base
         kb = get_knowledge_base()
 
@@ -283,28 +315,58 @@ class Orchestrator:
                 f"confidences={confidences}"
             )
 
-            # 尝试知识库RAG增强
-            rag_results = await kb.search(ctx.question, top_k=3)
-            if rag_results:
-                # 有检索结果，补充后重新生成
-                rag_context = "\n\n".join(
-                    f"[{r.source}] {r.content}" for r in rag_results
+            # 每个 Agent 用自己的 agent_name 做 filter_agent 检索
+            # （方案书 3.2.1 节：10 个领域 Agent 各自只检索自己分类下的 chunk）
+            regen_tasks = []
+            for co in seg_outputs:
+                agent = DomainAgent(co.agent_id)
+                # 先按 Agent 分类过滤检索
+                agent_results = await kb.search(
+                    ctx.question, top_k=3, filter_agent=agent.agent_name
                 )
-                logger.info(
-                    f"RAG增强: seg={seg.seg_id}, 补充{len(rag_results)}条检索结果，重新生成候选"
-                )
-                regen_tasks = []
-                for co in seg_outputs:
-                    agent = DomainAgent(co.agent_id)
-                    task = agent.generate_candidate(
-                        question=ctx.question,
-                        profile=ctx.profile,
-                        seg_id=seg.seg_id,
-                        rag_context=rag_context,
+                if agent_results:
+                    logger.info(
+                        f"RAG增强(分类过滤): seg={seg.seg_id}, "
+                        f"agent={agent.agent_name}, 命中{len(agent_results)}条本分类chunk"
                     )
-                    regen_tasks.append(task)
-                regen_results = await asyncio.gather(*regen_tasks)
-                ctx.candidate_outputs[i] = list(regen_results)
+                else:
+                    # 该 Agent 分类下无结果，fallback 到全局检索
+                    agent_results = await kb.search(ctx.question, top_k=3)
+                    logger.info(
+                        f"RAG增强(全局fallback): seg={seg.seg_id}, "
+                        f"agent={agent.agent_name} 本分类无结果，用全局{len(agent_results)}条"
+                    )
+
+                if agent_results:
+                    rag_context = "\n\n".join(
+                        f"[{r.source}] {r.content}" for r in agent_results
+                    )
+                else:
+                    rag_context = None
+
+                if not rag_context:
+                    # 知识库不可用，跳过该 Agent 的重新生成
+                    continue
+
+                task = agent.generate_candidate(
+                    question=ctx.question,
+                    profile=ctx.profile,
+                    seg_id=seg.seg_id,
+                    rag_context=rag_context,
+                )
+                regen_tasks.append((co, task))
+
+            if regen_tasks:
+                logger.info(
+                    f"RAG增强: seg={seg.seg_id}, "
+                    f"补充检索结果后重新生成{len(regen_tasks)}个候选"
+                )
+                regen_results = await asyncio.gather(*[t[1] for t in regen_tasks])
+                # 用重新生成的结果替换原结果
+                regen_map = {t[0].agent_id: r for t, r in zip(regen_tasks, regen_results)}
+                ctx.candidate_outputs[i] = [
+                    regen_map.get(co.agent_id, co) for co in seg_outputs
+                ]
             else:
                 # 知识库不可用，标记低置信度段（审核团队会自然给出低分）
                 logger.warning(
@@ -379,12 +441,30 @@ class Orchestrator:
             winning_agent = DomainAgent(winner_candidate.agent_id)
 
             # 聚焦输出（含审核反馈回流）
-            focused = await winning_agent.generate_focused_output(
-                question=ctx.question,
-                profile=ctx.profile,
-                original_output=winner_output,
-                review_feedback=review,
-            )
+            try:
+                focused = await winning_agent.generate_focused_output(
+                    question=ctx.question,
+                    profile=ctx.profile,
+                    original_output=winner_output,
+                    review_feedback=review,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"段{review.seg_id}聚焦输出失败，降级为候选输出直接送裁判: {e}"
+                )
+                # 从候选输出构造最小可用的FocusedOutput
+                ans = winner_output.answer
+                steps = list(ans.reasoning_steps) if ans.reasoning_steps else []
+                while len(steps) < 3:
+                    steps.append("（降级模式：补充推理步骤）")
+                focused = FocusedOutput(
+                    conclusion=ans.conclusion or "（降级模式：未经聚焦优化）",
+                    reasoning_steps=steps,
+                    knowledge_refs=ans.knowledge_refs,
+                    applicable_conditions=ans.applicable_conditions or "（降级模式）",
+                    code_example=ans.code_example,
+                    difficulty_note=ans.difficulty_note,
+                )
 
             ctx.focused_outputs.append(focused)
             ctx.winning_agents.append(winning_agent)
@@ -430,6 +510,7 @@ class Orchestrator:
                 losing_candidate=losing_candidate,
                 losing_agent=losing_agent,
                 winning_agent=winning_agent,
+                review_feedback=ctx.review_feedbacks[i] if i < len(ctx.review_feedbacks) else None,
             )
             judge_tasks.append(task)
 
@@ -452,6 +533,32 @@ class Orchestrator:
         )
 
         return ctx.judge_verdict
+
+    def _force_pass_with_override(self, ctx: TaskContext, original_verdict: Verdict):
+        """强制放行降级标记（方案书4.4.2第1366行：修改超上限/全票失败时标注低置信度强制通过）
+
+        将 verdict 降级为 LOW_CONFIDENCE_PASSED 并标记 override_reason，
+        确保强制放行事件可见、可统计、可监控。
+        正常流程下 0:3 全票失败已在 JudgePanel 终审处理，此方法主要兜底
+        REVISE 超修改上限的场景。
+        """
+        if not ctx.judge_verdict:
+            return
+        if original_verdict == Verdict.FAILED:
+            reason = "unanimous_fail_force_pass"
+            logger.error(
+                f"⚠️ 裁判FAILED强制放行: task={ctx.task_id}, "
+                f"verdict={original_verdict.value}"
+            )
+        else:
+            reason = "revision_limit_force_pass"
+            logger.warning(
+                f"修改超上限强制通过: task={ctx.task_id}, "
+                f"revision_count={ctx.revision_count}, "
+                f"verdict={original_verdict.value}"
+            )
+        ctx.judge_verdict.verdict = Verdict.LOW_CONFIDENCE_PASSED
+        ctx.judge_verdict.override_reason = reason
 
     async def _do_revising(self, ctx: TaskContext):
         """REVISING: Agent根据裁判团反馈修改FocusedOutput
@@ -499,6 +606,7 @@ class Orchestrator:
         """FORMATTING: 资源生成Agent按条件生成3种形态
 
         多段场景：使用合并后的聚焦输出统一生成资源包。
+        降级策略（方案书§8.5.3）：资源生成失败时仅生成讲义，不中断流程。
         """
         await ws_manager.push_state(ctx.task_id, FSMState.FORMATTING.value)
 
@@ -506,11 +614,34 @@ class Orchestrator:
         if not focused:
             raise OrchestratorError("无聚焦输出可供资源生成")
 
-        ctx.resource_package = await self.resource_agent.generate_resource_package(
-            task_id=ctx.task_id,
-            focused_output=focused,
-            profile=ctx.profile,
-        )
+        try:
+            ctx.resource_package = await self.resource_agent.generate_resource_package(
+                task_id=ctx.task_id,
+                focused_output=focused,
+                profile=ctx.profile,
+            )
+        except Exception as e:
+            logger.warning(f"资源生成失败，降级为仅生成讲义: {e}")
+            from backend.schemas.resource_package import Lecture, KnowledgeRefDisplay
+            ctx.resource_package = ResourcePackage(
+                task_id=ctx.task_id,
+                lecture=Lecture(
+                    title="学习资源（降级模式）",
+                    content_markdown=focused.conclusion,
+                    difficulty_note=focused.difficulty_note or "（降级模式）",
+                    knowledge_refs_display=[
+                        KnowledgeRefDisplay(
+                            source=ref.source,
+                            verification_status="待验证",
+                        )
+                        for ref in focused.knowledge_refs
+                    ],
+                ),
+                practice_guide=None,
+                quiz=None,
+                focused_output_ref=ctx.task_id,
+                profile_ref=ctx.session_id,
+            )
 
         await ws_manager.push_state(
             ctx.task_id, FSMState.FORMATTING.value,
@@ -520,6 +651,31 @@ class Orchestrator:
                 "quiz": ctx.resource_package.quiz is not None,
             },
         )
+
+    def _extract_review_summary(self, ctx: TaskContext) -> dict | None:
+        """从审核反馈中提取获胜候选的评分均值（第七部分量化指标数据源）"""
+        if not ctx.review_feedbacks:
+            return None
+
+        fact_scores = []
+        logic_scores = []
+        peda_scores = []
+        for review in ctx.review_feedbacks:
+            for cand in review.candidates:
+                if cand.is_winner:
+                    fact_scores.append(cand.scores.fact_accuracy)
+                    logic_scores.append(cand.scores.logic_completeness)
+                    peda_scores.append(cand.scores.pedagogical_fit)
+
+        if not fact_scores:
+            return None
+
+        n = len(fact_scores)
+        return {
+            "fact_accuracy": sum(fact_scores) / n,
+            "logic_completeness": sum(logic_scores) / n,
+            "pedagogical_fit": sum(peda_scores) / n,
+        }
 
     async def _write_contribution_memory(self, ctx: TaskContext):
         """写贡献记忆 - COMPLETE状态"""
@@ -846,4 +1002,9 @@ class Orchestrator:
 
         logger.debug(f"FSM转移: {ctx.current_state.value} → {new_state.value}")
         ctx.current_state = new_state
-        await ws_manager.push_state(ctx.task_id, new_state.value)
+        # P1-1: push_state 内部会同步更新 status 接口缓存，保证 /api/status 一致
+        await ws_manager.push_state(
+            ctx.task_id,
+            new_state.value,
+            {"revision": ctx.revision_count, "session_id": ctx.session_id},
+        )

@@ -82,3 +82,12 @@ class JudgeVerdict(BaseModel):
     overall_verification_rate: float = Field(
         ge=0.0, le=1.0, description="整体溯源验证率"
     )
+    override_reason: Optional[str] = Field(
+        None,
+        description=(
+            "强制放行原因，仅当裁判未通过但系统仍放行时填写。"
+            "unanimous_fail_force_pass=全票失败终审仍不通过但强制放行；"
+            "revision_limit_force_pass=修改超上限强制通过。"
+            "为空表示正常通过/正常降级，无强制放行。"
+        ),
+    )

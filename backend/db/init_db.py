@@ -1,4 +1,4 @@
-"""数据库初始化脚本 - 创建全部9张表 + 种子数据
+"""数据库初始化脚本 - 创建全部13张表 + 种子数据
 
 对应方案书 5.1.1 节 SQLite表结构
 """
@@ -11,7 +11,7 @@ from backend.config import get_settings
 
 
 # ============================================================
-# DDL: 9张表
+# DDL: 12张表
 # ============================================================
 
 DDL_STATEMENTS = [
@@ -75,6 +75,7 @@ DDL_STATEMENTS = [
         feedback_type TEXT NOT NULL,  -- helpful/not_helpful/content_error/difficulty_mismatch
         comment       TEXT,
         created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES session(session_id),
         FOREIGN KEY(agent_id) REFERENCES agent_cards(agent_id)
     )
     """,
@@ -103,7 +104,8 @@ DDL_STATEMENTS = [
         intent_type         TEXT NOT NULL,
         domain_confidence   TEXT NOT NULL,    -- JSON对象
         created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(session_id, version)
+        UNIQUE(session_id, version),
+        FOREIGN KEY(session_id) REFERENCES session(session_id)
     )
     """,
 
@@ -146,11 +148,98 @@ DDL_STATEMENTS = [
     )
     """,
 
+    # 10. 离线演示缓存表（P1-6，方案书附录E）
+    # 现场无网络时，/api/ask 优先查此表命中则不走 LLM
+    """
+    CREATE TABLE IF NOT EXISTS demo_cache (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        question_hash TEXT NOT NULL UNIQUE,       -- sha256(normalized_question)
+        question_text TEXT NOT NULL,              -- 原始问题（便于人工核对）
+        answer_json   TEXT NOT NULL,              -- 完整 AskResponse 序列化
+        profile_json  TEXT,                       -- 命中时的学情画像（可选）
+        hit_count     INTEGER DEFAULT 0,
+        created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+
+    # 11a. 会话表（P1-7，方案书 7.4 节数据合规）
+    # 会话隔离：按 session_id 隔离，不同学生数据互不可见
+    # 正式纳入 init_db DDL（原由 compliance.py 运行时动态建，现统一管理）
+    """
+    CREATE TABLE IF NOT EXISTS session (
+        session_id  TEXT PRIMARY KEY,
+        created_at  TEXT
+    )
+    """,
+
+    # 11b. 会话历史表（P1-7，方案书 7.4 节数据合规）
+    # 数据保留：expires_at 到期自动清除（默认 30 天）
+    # 注意：task_id 是 orchestrator 运行时生成的临时字符串 ID（如 task_xxx），
+    #       不持久化到任何表，因此不设外键（原 REFERENCES demo_cache(id) 是错误定义）
+    """
+    CREATE TABLE IF NOT EXISTS conversations (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id  TEXT NOT NULL,
+        task_id     TEXT,
+        role        TEXT NOT NULL,                -- user / assistant / system
+        content     TEXT NOT NULL,
+        is_ai_generated BOOLEAN DEFAULT 0,        -- 标注 AI 生成内容
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at  TIMESTAMP NOT NULL,           -- 过期时间，cleanup 按此清理
+        FOREIGN KEY(session_id) REFERENCES session(session_id)
+    )
+    """,
+
+    # 12. 任务资源难度统计表（8.2.2 节可视化报告组件2数据源）
+    # 记录每次任务的 quiz difficulty 分布，供"资源难度匹配曲线"读取
+    """
+    CREATE TABLE IF NOT EXISTS task_resource_stats (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id              TEXT NOT NULL,
+        session_id           TEXT NOT NULL,
+        domain               TEXT,                  -- 涉及的知识领域（如 RAG）
+        knowledge_level      TEXT,                  -- 学生当时水平 ENTRY/INTERMEDIATE/ADVANCED
+        quiz_difficulties    TEXT,                  -- JSON: {"基础":2,"应用":1,"综合":1,"进阶":0}
+        lecture_difficulty_note TEXT,               -- 讲义难度说明文本
+        created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES session(session_id)
+    )
+    """,
+
+    # 13. 任务指标表（第七部分量化指标验证数据源）
+    # 记录每次任务的裁判裁决指标 + 审核评分，供 validate_metrics.py 读取
+    # 对应方案书 7.1 节赛题指标映射 + 7.2.3 节验证方法
+    """
+    CREATE TABLE IF NOT EXISTS task_metrics (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id              TEXT NOT NULL,
+        session_id           TEXT NOT NULL,
+        verdict              TEXT,                  -- passed/revise/low_confidence_passed/failed
+        verification_rate    REAL,                  -- judge_verdict.overall_verification_rate (0-1)
+        traceability_total   INTEGER DEFAULT 0,    -- 溯源标注总条数
+        traceability_verified INTEGER DEFAULT 0,  -- 状态为"已验证"的条数
+        knowledge_refs_count INTEGER DEFAULT 0,    -- 聚焦输出引用的知识库条目数
+        fact_accuracy        REAL,                  -- Verifier 事实准确率 (0-1)
+        logic_completeness   REAL,                  -- Skeptic 逻辑健全性 (0-1)
+        pedagogical_fit      REAL,                  -- Evaluator 教学适配度 (0-1)
+        review_score         REAL,                  -- 三项均值 (0-1)
+        override_reason      TEXT,                  -- 强制放行原因（unanimous_fail_force_pass/revision_limit_force_pass）
+        created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES session(session_id)
+    )
+    """,
+
     # 索引
     "CREATE INDEX IF NOT EXISTS idx_perf_agent_tag ON agent_performance(agent_id, function_tag)",
+    "CREATE INDEX IF NOT EXISTS idx_resource_stats_session ON task_resource_stats(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_metrics_session ON task_metrics(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_memory_agent_tag ON contribution_memory(agent_id, function_tag)",
     "CREATE INDEX IF NOT EXISTS idx_profiles_session ON student_profiles(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_feedback_session ON student_feedback(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_demo_cache_hash ON demo_cache(question_hash)",
+    "CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_conv_expires ON conversations(expires_at)",
 ]
 
 
@@ -163,6 +252,9 @@ def init_database():
             conn.execute(ddl)
         conn.commit()
         logger.info(f"数据库表已创建/确认存在（{len(DDL_STATEMENTS)}条DDL）")
+
+        # 安全加列（已有数据库兼容）
+        _safe_add_column(conn, "task_metrics", "override_reason", "TEXT")
 
         # 写入系统配置种子数据
         _seed_system_config(conn)
@@ -177,8 +269,17 @@ def init_database():
         conn.rollback()
         logger.error(f"数据库初始化失败: {e}")
         raise
-    finally:
-        conn.close()
+    # P1-5: 连接复用模式，不主动 close（由连接池统一管理）
+
+
+def _safe_add_column(conn, table: str, column: str, col_type: str):
+    """安全加列：检查列是否存在，不存在才 ALTER TABLE（已有数据库兼容）"""
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    if column not in existing_cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        conn.commit()
+        logger.info(f"数据库迁移: {table} 加列 {column} {col_type}")
 
 
 def _seed_system_config(conn):
