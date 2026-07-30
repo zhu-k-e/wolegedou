@@ -7,6 +7,9 @@ from pathlib import Path
 
 from backend.config import get_settings
 
+# 手动运行的联调脚本不被 pytest 收集
+collect_ignore = ["test_llm_connectivity.py", "test_real_e2e.py", "debug_candidate.py"]
+
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_env():
