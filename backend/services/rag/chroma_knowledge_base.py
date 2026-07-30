@@ -23,7 +23,11 @@ from typing import Optional
 from loguru import logger
 
 from backend.config import get_settings
-from backend.services.knowledge_base import KnowledgeBaseInterface, RetrievalResult
+from backend.services.knowledge_base import (
+    KnowledgeBaseInterface,
+    RetrievalResult,
+    resolve_source,
+)
 from backend.services.rag.document_loader import DocumentChunk
 from backend.services.rag.embedding_service import EmbeddingService
 
@@ -150,7 +154,7 @@ class ChromaKnowledgeBase(KnowledgeBaseInterface):
                 RetrievalResult(
                     chunk_id=doc_id,
                     content=documents[i] if i < len(documents) else "",
-                    source=metadata.get("section_path", metadata.get("source_doc", "未知")),
+                    source=resolve_source(metadata),
                     score=score,
                     metadata=metadata,
                 )
@@ -209,25 +213,42 @@ class ChromaKnowledgeBase(KnowledgeBaseInterface):
         best = results[0]
         threshold = self._settings.kb_score_threshold
 
+        # 转 dict 列表：RetrievalResult 是 dataclass，不能直接 JSON 序列化
+        evidence = [
+            {
+                "chunk_id": r.chunk_id,
+                "content": r.content,
+                "source": r.source,
+                "score": r.score,
+                "metadata": r.metadata,
+            }
+            for r in results
+        ]
+
         if best.score < threshold:
             # 最高分都低于阈值 → 知识库中找不到对应内容
             return {
                 "status": "待验证",
-                "evidence": results,
+                "evidence": evidence,
                 "source": best.source,
             }
 
-        # 高相似度 → 进一步用文本重叠度判断
+        # 高语义相似度（过了阈值）→ 进一步用文本重叠度辅助判断
         overlap = self._text_overlap(statement, best.content)
 
-        if overlap > 0.3:
-            status = "已验证"
-        elif overlap < 0.1 and best.score > 0.75:
-            # 高相似度但低文本重叠 → 可能矛盾
-            # （检索到了高度相关但内容不同的片段，可能是反面论述）
+        # 判断逻辑（best_score 为主判据，overlap 仅用于识别"矛盾"）：
+        # - best_score >= threshold（0.6）：bge-m3 语义相关，默认"已验证"
+        # - 例外：best_score > 0.75 且 overlap < 0.02 → "矛盾"
+        #   （语义高度相似但文本几乎不重叠，可能是 LLM 编造的看似相关内容）
+        #
+        # 原 logic 要求 overlap > 0.3 才判"已验证"，但 _text_overlap 用 Jaccard
+        # 相似度（中文按单字集合），对"短陈述 vs 长 chunk"场景天然偏低
+        # （陈述20字、chunk200字，Jaccard 必然小），导致几乎所有陈述都"待验证"。
+        # 改为以 best_score 为主，避免 Jaccard 对长短文本对比的偏差。
+        if best.score > 0.75 and overlap < 0.02:
             status = "矛盾"
         else:
-            status = "待验证"
+            status = "已验证"
 
         logger.debug(
             f"知识验证: statement='{statement[:30]}...', "
@@ -236,7 +257,7 @@ class ChromaKnowledgeBase(KnowledgeBaseInterface):
 
         return {
             "status": status,
-            "evidence": results,
+            "evidence": evidence,
             "source": best.source,
         }
 

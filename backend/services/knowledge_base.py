@@ -21,6 +21,25 @@ class RetrievalResult:
     metadata: dict                 # 元数据
 
 
+# 来源解析时跳过的占位符（知识库同学预处理时未填的字段统一标为"未分类"）
+_SOURCE_PLACEHOLDERS = {"", "未分类", "unknown", "None", "null"}
+
+
+def resolve_source(metadata: dict) -> str:
+    """从 chunk metadata 解析展示给学生的来源文档名
+
+    优先级：source_doc（具体文档名）> section_path（章节路径）> source_dir（分类目录）
+
+    知识库同学的预计算数据中 section_path 全为"未分类"占位符，
+    直接取会导致溯源标注全显示"未分类"，故遇到占位符时回退到下一优先级字段。
+    """
+    for key in ("source_doc", "section_path", "source_dir"):
+        val = str(metadata.get(key) or "").strip()
+        if val and val.lower() not in _SOURCE_PLACEHOLDERS:
+            return val
+    return "未知"
+
+
 class KnowledgeBaseInterface(ABC):
     """知识库抽象接口
 

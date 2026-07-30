@@ -67,6 +67,18 @@ class EmbeddingService:
         """稠密向量维度（bge-m3 = 1024）"""
         return 1024
 
+    def _resolve_model_path(self) -> str:
+        """解析模型加载路径：优先本地缓存目录，否则用 HF hub id
+
+        解决 huggingface_hub 在国内网络下载失败的问题：
+        git clone https://hf-mirror.com/BAAI/bge-m3 data/bge_m3_model
+        """
+        local_path = self._settings.project_root / self._settings.embedding_model_local_path
+        # 本地目录存在且包含 config.json 才认为是完整模型
+        if local_path.exists() and (local_path / "config.json").exists():
+            return str(local_path)
+        return self.model_name  # 回退到 "BAAI/bge-m3"（走 HF hub 下载）
+
     def _load_model(self):
         """加载 bge-m3 模型（懒加载，线程安全）"""
         if self._loaded:
@@ -76,14 +88,18 @@ class EmbeddingService:
             if self._loaded:
                 return
 
-            model_name = self.model_name
-            logger.info(f"正在加载 Embedding 模型: {model_name}（首次加载需下载约 2.2GB）")
+            model_path = self._resolve_model_path()
+            is_local = model_path != self.model_name
+            logger.info(
+                f"正在加载 Embedding 模型: {model_path}"
+                f"{'（本地路径）' if is_local else '（首次加载需下载约 2.2GB）'}"
+            )
 
             # 优先尝试 FlagEmbedding（方案书 6.5 推荐方式）
             try:
                 from FlagEmbedding import BGEM3FlagModel
 
-                self._model = BGEM3FlagModel(model_name, use_fp16=True)
+                self._model = BGEM3FlagModel(model_path, use_fp16=True)
                 self._backend = "flag"
                 self._loaded = True
                 logger.info("Embedding 模型加载成功 (后端: FlagEmbedding)")
@@ -97,7 +113,7 @@ class EmbeddingService:
             try:
                 from sentence_transformers import SentenceTransformer
 
-                self._model = SentenceTransformer(model_name)
+                self._model = SentenceTransformer(model_path)
                 self._backend = "st"
                 self._loaded = True
                 logger.info("Embedding 模型加载成功 (后端: sentence-transformers)")

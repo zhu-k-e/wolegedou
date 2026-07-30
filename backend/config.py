@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     """系统全局配置，从 .env 文件自动加载"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # 用绝对路径定位项目根的 .env，避免因 CWD 不同读到 backend/.env 导致两份配置不一致
+        env_file=Path(__file__).resolve().parent.parent / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -19,7 +20,7 @@ class Settings(BaseSettings):
     # 中档模型
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"
 
     # 高档模型
     openai_api_key: str = ""
@@ -47,8 +48,24 @@ class Settings(BaseSettings):
     kb_backend: str = "auto"
     kb_numpy_dir: str = "data/numpy_kb"            # numpy 四件套目录（vectors.npy 等）
 
+    # 混合检索（方案书 6.6 节：稠密+稀疏混合模式）
+    # True: dense(bge-m3 cosine) + sparse(BM25) → RRF 融合
+    # False: 纯稠密检索（降级模式）
+    kb_hybrid_search: bool = True
+    kb_rrf_k: int = 60                             # RRF 融合参数 k（业界默认 60）
+
+    # 查询扩展（方案书 v7.0：查询扩展+术语映射表）
+    # True: 对 query 做术语映射扩展，生成多变体提升跨语言检索召回率
+    # BM25 对每个变体检索取最高分；dense 对多变体编码取平均向量
+    kb_query_expansion: bool = True
+
+    # bge-m3 模型本地缓存目录
+    # 首次通过 git clone https://hf-mirror.com/BAAI/bge-m3 下载到此处
+    # 加载时优先使用本地路径，避免 huggingface_hub 在国内下载失败
+    embedding_model_local_path: str = "data/bge_m3_model"
+
     # --- 服务 ---
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
     debug: bool = True
     log_level: str = "DEBUG"
@@ -60,8 +77,24 @@ class Settings(BaseSettings):
     elimination_consecutive_count: int = 3
 
     # --- 超时 ---
-    llm_timeout: int = 30
+    llm_timeout: int = 60
     fsm_max_revisions: int = 2
+
+    # --- CORS / 安全 ---
+    # 逗号分隔的允许源列表，留空则用默认 localhost 白名单
+    cors_origins: list[str] = []
+    # 简单 API Key 认证（空字符串=不启用；启用后客户端需带 X-API-Key 头）
+    api_key: str = ""
+    # 每个客户端每分钟最大请求数（0=不限流）
+    rate_limit_per_minute: int = 60
+
+    # --- 数据合规（方案书 7.4 节）---
+    # 对话历史保留天数，过期自动清除
+    conversation_retention_days: int = 30
+
+    # --- 离线演示缓存（附录 E）---
+    # 启用后 /api/ask 优先查 demo_cache 表，命中则不走 LLM
+    demo_cache_enabled: bool = False
 
     @property
     def db_full_path(self) -> Path:
