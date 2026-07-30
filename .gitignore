@@ -19,6 +19,10 @@ data/numpy_kb/
 data/raw_docs/
 *.npy
 
+# bge-m3 模型本地缓存（2.2GB，通过 git clone https://hf-mirror.com/BAAI/bge-m3 下载）
+# 不入 Git，各人本地下载
+data/bge_m3_model/
+
 # 测试
 .pytest_cache/
 htmlcov/
@@ -27,3 +31,26 @@ htmlcov/
 # 系统
 .DS_Store
 Thumbs.db
+
+# 后端运行时数据库（SQLite，运行时生成，不入 Git）
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
+
+# 调试/敏感残留（不入 Git）
+backend/tests/debug_candidate.py
+backend/.env.py
+
+# 运行时数据库备份 / 共享内存（不入 Git）
+data/*.db-shm
+data/*.db-wal
+data/*.db.bak_*
+
+# 二进制穿透工具（cloudflared，本地下载，不入 Git）
+cloudflared.exe/
+
+# 个人调试 / 代理残留（不入 Git）
+new_sub.yaml
+diag_resp*.json
+verify_resp.json
+
