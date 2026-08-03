@@ -8,6 +8,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from backend.config import get_settings
 from backend.services.ws_manager import ws_manager
 
 router = APIRouter()
@@ -27,6 +28,16 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
         "data": {"profile": {...}}
     }
     """
+    # 可选 API Key 鉴权（与 HTTP 中间件一致：config.api_key 为空则不启用）
+    api_key = get_settings().api_key
+    if api_key:
+        provided = websocket.query_params.get("api_key") or websocket.headers.get(
+            "X-API-Key"
+        )
+        if provided != api_key:
+            await websocket.close(code=1008, reason="无效或缺失 API Key")
+            return
+
     await ws_manager.connect(websocket, task_id)
     try:
         while True:

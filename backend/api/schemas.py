@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 class AskRequest(BaseModel):
     """学生提问请求"""
-    question: str = Field(description="学生当前问题")
+    question: str = Field(..., max_length=4000, description="学生当前问题")
     session_id: str = Field(description="会话ID")
     history: Optional[list[dict]] = Field(
         None, description="历史对话（同一session，首次为空）"
@@ -27,7 +27,7 @@ class FeedbackRequest(BaseModel):
     feedback_type: str = Field(
         description="helpful / not_helpful / content_error / difficulty_mismatch"
     )
-    comment: Optional[str] = None
+    comment: Optional[str] = Field(None, max_length=2000, description="可选评论")
 
 
 class QuizSubmitRequest(BaseModel):
@@ -70,6 +70,7 @@ class StatusResponse(BaseModel):
     task_id: str
     state: str
     data: Optional[dict] = None
+    result: Optional[dict] = None  # 任务完成时的最终结果（与 /api/ask 返回结构一致）
 
 
 class FeedbackResponse(BaseModel):
@@ -85,6 +86,7 @@ class QuizSubmitResponse(BaseModel):
     accuracy: float
     action: str = Field(description="redimension / advance / recheck")
     new_resources: Optional[dict] = None
+    advance_question: Optional[dict] = None
     followup_questions: Optional[list[str]] = None
 
 

@@ -318,10 +318,21 @@ class JudgePanel:
         raw_verdict = data.get("verdict", "failed")
         judgment = "pass" if raw_verdict in ("passed", "low_confidence_passed") else "fail"
 
+        # 证据字段兼容多键：LLM 可能把审查依据放在 issues / evidence / reasons 任一键下，
+        # 仅读 issues 会导致裁判意见 evidence 永远为空
+        raw_evidence = (
+            data.get("issues")
+            or data.get("evidence")
+            or data.get("reasons")
+            or []
+        )
+        if isinstance(raw_evidence, str):
+            raw_evidence = [raw_evidence]
+
         return JudgeOpinion(
             role=judge.agent_name,
             judgment=judgment,
-            evidence=[_safe_str(item) for item in data.get("issues", [])],
+            evidence=[_safe_str(item) for item in raw_evidence],
             confidence=data.get("confidence", 0.5),
         )
 
@@ -614,24 +625,57 @@ class JudgePanel:
         if not statements:
             return []
 
+        # 本答案所依托的真实检索文档（领域Agent RAG 引用），用于推理类声明的归因。
+        # 推理步骤/conclusion 是模型综合推理，无单一外部文档，不应为每条声明做
+        # 一次全新检索（顶部chunk常是语义相关但不含该声明的文档，导致
+        # "步骤1→PEFT模型合并文档"式错配，见 demo-20）。统一归因到这些真实文档。
+        grounded_sources = [ref.source for ref in focused.knowledge_refs if ref.source]
+        grounded_source_str = (
+            "；".join(grounded_sources)
+            if grounded_sources
+            else "未关联知识库文档（模型综合推理）"
+        )
+
+        status_map = {
+            "已验证": VerificationStatus.VERIFIED,
+            "矛盾": VerificationStatus.CONTRADICTED,
+            "待验证": VerificationStatus.UNVERIFIED,
+        }
+
         items: list[TraceabilityItem] = []
         for entry in statements:
             result = await self.judge_fact._kb.verify_statement(entry["statement"])
-
-            status_map = {
-                "已验证": VerificationStatus.VERIFIED,
-                "矛盾": VerificationStatus.CONTRADICTED,
-                "待验证": VerificationStatus.UNVERIFIED,
-            }
             status = status_map.get(
                 result.get("status", "待验证"), VerificationStatus.UNVERIFIED
             )
 
+            # 来源归因（修复 demo-20 源文不匹配）：
+            #   - knowledge_ref：用领域Agent最初引用的权威真实来源（ref.source），
+            #     verify_statement 只用于判定验证状态，绝不覆盖来源。
+            #   - conclusion / reasoning_step：模型综合推理，无单一外部文档，
+            #     归因到本答案依托的检索文档集合，而非检索顶部chunk来源。
+            if entry["category"] == "knowledge_ref":
+                source = entry["source"]
+            else:
+                source = grounded_source_str
+
             items.append(TraceabilityItem(
                 statement=entry["statement"][:200],
-                source=result.get("source", entry["source"]),
+                source=source,
                 verification_status=status,
             ))
+
+        # 去重：相同 (声明, 来源) 只保留一条，避免溯源列表冗余（如多条 knowledge_refs
+        # 指向同一文档同一声明时，显示为重复条目）
+        deduped: list[TraceabilityItem] = []
+        seen_keys: set[tuple[str, str]] = set()
+        for it in items:
+            key = (it.statement, it.source)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(it)
+        items = deduped
 
         logger.debug(
             f"[JudgePanel] 溯源标注: {len(statements)} 条声明"

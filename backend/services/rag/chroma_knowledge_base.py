@@ -210,7 +210,9 @@ class ChromaKnowledgeBase(KnowledgeBaseInterface):
                 "source": "知识库无相关文档",
             }
 
-        best = results[0]
+        # 取相似度最高的一条（与 NumpyKnowledgeBase 一致）：
+        # 混合检索下 results 按融合名次排序，.score 未必单调，不能直接取 [0]。
+        best = max(results, key=lambda r: r.score)
         threshold = self._settings.kb_score_threshold
 
         # 转 dict 列表：RetrievalResult 是 dataclass，不能直接 JSON 序列化
@@ -233,19 +235,14 @@ class ChromaKnowledgeBase(KnowledgeBaseInterface):
                 "source": best.source,
             }
 
-        # 高语义相似度（过了阈值）→ 进一步用文本重叠度辅助判断
+        # 归因分级（与 NumpyKnowledgeBase 口径严格一致，详见该文件内的定标说明）：
+        #   "已验证" = 检索到达标支撑文档（可溯源），**不等于事实正确**
+        #   "矛盾"   = 高度相关却几乎零字面重叠，疑似看似相关的编造内容
+        # 实测表明相似度只能刻画话题相关性，无法判定事实正确性
+        # （正/负样本相似度分布重合，median 0.640 vs 0.641），
+        # 故不再设 0.72 的"强相关才算已验证"中间带 —— 那只会让正确陈述也判不过。
         overlap = self._text_overlap(statement, best.content)
-
-        # 判断逻辑（best_score 为主判据，overlap 仅用于识别"矛盾"）：
-        # - best_score >= threshold（0.6）：bge-m3 语义相关，默认"已验证"
-        # - 例外：best_score > 0.75 且 overlap < 0.02 → "矛盾"
-        #   （语义高度相似但文本几乎不重叠，可能是 LLM 编造的看似相关内容）
-        #
-        # 原 logic 要求 overlap > 0.3 才判"已验证"，但 _text_overlap 用 Jaccard
-        # 相似度（中文按单字集合），对"短陈述 vs 长 chunk"场景天然偏低
-        # （陈述20字、chunk200字，Jaccard 必然小），导致几乎所有陈述都"待验证"。
-        # 改为以 best_score 为主，避免 Jaccard 对长短文本对比的偏差。
-        if best.score > 0.75 and overlap < 0.02:
+        if best.score > 0.85 and overlap < 0.02:
             status = "矛盾"
         else:
             status = "已验证"

@@ -5,6 +5,7 @@
 
 from fastapi import APIRouter
 
+from backend.api.routes.ask import get_orchestrator
 from backend.api.schemas import StatusResponse
 
 router = APIRouter()
@@ -21,10 +22,12 @@ def update_task_state(task_id: str, state: str, data: dict | None = None):
 
 @router.get("/status/{task_id}", response_model=StatusResponse)
 async def get_status(task_id: str) -> StatusResponse:
-    """查询任务当前FSM状态"""
+    """查询任务当前FSM状态；任务完成时附带最终结果 result"""
     state_info = _task_states.get(task_id, {"state": "UNKNOWN", "data": {}})
+    result = get_orchestrator().get_task_result(task_id)
     return StatusResponse(
         task_id=task_id,
         state=state_info["state"],
         data=state_info.get("data"),
+        result=result,
     )

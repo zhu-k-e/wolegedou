@@ -131,7 +131,7 @@ class DomainAgent(BaseAgent):
             user_prompt=user_prompt,
             model_class=CandidateOutput,
             tier=ModelTier.MID,
-            temperature=0.7,
+            temperature=0.3,  # 候选输出temperature从0.7下调至0.3：抑制偶发离题漂移(同题随机生成微积分/二次函数等无关主题)，不增调用次数/时间，教学正确性更稳
             max_tokens=4096,  # 候选输出含完整答案+代码示例，2048易截断
         )
 
@@ -139,6 +139,7 @@ class DomainAgent(BaseAgent):
             f"候选输出: {self.agent_id} seg={seg_id}, "
             f"confidence={result.self_confidence.score}"
         )
+        logger.info(f"[DEBUG candidate] {self.agent_id} conclusion={result.answer.conclusion[:200]!r}")
         return result
 
     # ============================================================

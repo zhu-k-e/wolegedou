@@ -45,5 +45,7 @@ async def submit_quiz(request: QuizSubmitRequest) -> QuizSubmitResponse:
         task_id=request.task_id,
         accuracy=round(accuracy, 4),
         action=action,
+        new_resources=result.get("reduced_resource_package"),
+        advance_question=result.get("advance_question"),
         followup_questions=followup_questions,
     )

@@ -11,6 +11,7 @@
 """
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
@@ -25,7 +26,9 @@ from backend.agents.resource_agent import ResourceAgent
 from backend.agents.review_team import ReviewTeam
 from backend.agents.judge_panel import JudgePanel
 from backend.agents.matcher import Matcher, DispatchResult, Segment
-from backend.schemas.student_profile import StudentProfile, IntentType
+from backend.schemas.student_profile import (
+    StudentProfile, IntentType, ComplexityEstimate, QuestionType,
+)
 from backend.schemas.candidate_output import CandidateOutput
 from backend.schemas.review_feedback import ReviewFeedback
 from backend.schemas.focused_output import FocusedOutput
@@ -34,6 +37,10 @@ from backend.schemas.resource_package import ResourcePackage
 from backend.services.ws_manager import ws_manager
 from backend.services.memory_service import get_memory_service
 from backend.config import get_settings
+
+
+# 聚焦输出单段零降级重试上限（指数退避：1s, 2s）。仅失败时发生，正常 0 成本。
+FOCUS_MAX_RETRIES = 3
 
 
 @dataclass
@@ -58,6 +65,9 @@ class TaskContext:
     # FSM状态
     current_state: FSMState = FSMState.IDLE
     revision_count: int = 0
+    # 方案一：JUDGING 与 FORMATTING 并行时，FORMATTING 的后台任务句柄
+    # （两者都只依赖 focused_output，可并发执行以省一段串行耗时）
+    fmt_task: Optional[asyncio.Task] = None
 
     # 候选Agent引用（用于辩论）
     winning_agents: list[DomainAgent] = field(default_factory=list)
@@ -84,6 +94,10 @@ class Orchestrator:
         self._settings = get_settings()
         # 缓存已完成任务的上下文，供延伸路径恢复使用
         self._task_contexts: dict[str, TaskContext] = {}
+        # 已完成任务的最终结果（异步任务轮询接口 GET /api/status/{task_id} 使用）
+        self._task_results: dict[str, dict] = {}
+        # 后台任务引用集合（防止 asyncio.Task 被 GC 提前回收导致任务静默取消）
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def process_question(
         self,
@@ -113,39 +127,7 @@ class Orchestrator:
             # 缓存上下文供延伸路径使用
             self._task_contexts[task_id] = ctx
 
-            # 第七部分量化指标：提取审核评分均值 + 知识引用数
-            review_summary = self._extract_review_summary(ctx)
-            knowledge_refs_count = (
-                len(ctx.merged_focused_output.knowledge_refs)
-                if ctx.merged_focused_output
-                else sum(len(fo.knowledge_refs) for fo in ctx.focused_outputs)
-            )
-
-            return {
-                "task_id": task_id,
-                "session_id": session_id,
-                "profile": ctx.profile.model_dump() if ctx.profile else None,
-                "resource_package": ctx.resource_package.model_dump() if ctx.resource_package else None,
-                "judge_verdict": ctx.judge_verdict.model_dump() if ctx.judge_verdict else None,
-                "review_summary": review_summary,
-                "knowledge_refs_count": knowledge_refs_count,
-                "dispatch_info": {
-                    "intent": ctx.dispatch_result.intent.value if ctx.dispatch_result else None,
-                    "segments": [
-                        {
-                            "seg_id": s.seg_id,
-                            "domain": s.domain,
-                            "candidates": [
-                                {"agent_id": c["agent_id"], "composite_score": c["composite_score"]}
-                                for c in s.candidates
-                            ],
-                        }
-                        for s in (ctx.dispatch_result.segments if ctx.dispatch_result else [])
-                    ],
-                } if ctx.dispatch_result else None,
-                "navigation_roadmap": ctx.dispatch_result.navigation_roadmap if ctx.dispatch_result else None,
-                "clarification_options": ctx.dispatch_result.clarification_options if ctx.dispatch_result else None,
-            }
+            return self._build_result(ctx, session_id, task_id)
 
         except Exception as e:
             logger.error(f"任务失败: task_id={task_id}, error={e}")
@@ -158,9 +140,112 @@ class Orchestrator:
                 "state": FSMState.ERROR.value,
             }
 
+    def _build_result(self, ctx: TaskContext, session_id: str, task_id: str) -> dict:
+        """从 TaskContext 组装最终响应字典（同步 /api/ask 与异步 /api/tasks 共用）"""
+        review_summary = self._extract_review_summary(ctx)
+        knowledge_refs_count = (
+            len(ctx.merged_focused_output.knowledge_refs)
+            if ctx.merged_focused_output
+            else sum(len(fo.knowledge_refs) for fo in ctx.focused_outputs)
+        )
+        return {
+            "task_id": task_id,
+            "session_id": session_id,
+            "profile": ctx.profile.model_dump() if ctx.profile else None,
+            "resource_package": ctx.resource_package.model_dump() if ctx.resource_package else None,
+            "judge_verdict": ctx.judge_verdict.model_dump() if ctx.judge_verdict else None,
+            "review_summary": review_summary,
+            "knowledge_refs_count": knowledge_refs_count,
+            "dispatch_info": {
+                "intent": ctx.dispatch_result.intent.value if ctx.dispatch_result else None,
+                "segments": [
+                    {
+                        "seg_id": s.seg_id,
+                        "domain": s.domain,
+                        "candidates": [
+                            {"agent_id": c["agent_id"], "composite_score": c["composite_score"]}
+                            for c in s.candidates
+                        ],
+                    }
+                    for s in (ctx.dispatch_result.segments if ctx.dispatch_result else [])
+                ],
+            } if ctx.dispatch_result else None,
+            "navigation_roadmap": ctx.dispatch_result.navigation_roadmap if ctx.dispatch_result else None,
+            "clarification_options": ctx.dispatch_result.clarification_options if ctx.dispatch_result else None,
+        }
+
+    def create_task(self, question: str, session_id: str, history: Optional[list[dict]] = None) -> str:
+        """创建任务并返回 task_id（不立即执行，供异步提交使用）"""
+        task_id = f"task_{uuid.uuid4().hex[:12]}"
+        ctx = TaskContext(
+            task_id=task_id,
+            session_id=session_id,
+            question=question,
+            history=history or [],
+        )
+        self._task_contexts[task_id] = ctx
+        # 初始状态 PENDING：避免后台任务首次 push 前轮询读到 UNKNOWN
+        try:
+            from backend.api.routes.status import update_task_state
+            update_task_state(task_id, "PENDING", {})
+        except Exception as e:
+            logger.warning(f"初始化任务状态失败(不影响执行): {e}")
+        logger.info(f"任务已创建(异步): task_id={task_id}")
+        return task_id
+
+    async def _run_task_background(self, task_id: str) -> None:
+        """后台执行任务主FSM，并将最终结果存入 _task_results（供轮询/WS 获取）"""
+        ctx = self._task_contexts.get(task_id)
+        if ctx is None:
+            logger.error(f"后台任务找不到上下文: task_id={task_id}")
+            return
+        try:
+            await self._run_main_fsm(ctx)
+            self._task_contexts[task_id] = ctx
+            self._task_results[task_id] = self._build_result(ctx, ctx.session_id, task_id)
+            # 落库生成资源文本（事实比对指标 + 测试数据套装数据源，容错，不增加调用时间）
+            try:
+                from backend.db.resource_store import save_task_resources
+                save_task_resources(
+                    task_id,
+                    ctx.session_id,
+                    self._task_results[task_id],
+                    getattr(ctx, "question", None),
+                )
+            except Exception as e:
+                logger.warning(f"落库生成资源失败（不影响主流程）: {e}")
+            logger.info(f"后台任务完成: task_id={task_id}")
+        except Exception as e:
+            logger.error(f"后台任务失败: task_id={task_id}, error={e}")
+            # 同步推进 ERROR 状态，保证前端轮询能正确识别失败（与同步版 process_question 的 except 一致）
+            try:
+                await ws_manager.push_state(task_id, FSMState.ERROR.value, {"error": str(e)})
+            except Exception:
+                pass
+            self._task_results[task_id] = {
+                "task_id": task_id,
+                "session_id": ctx.session_id,
+                "error": str(e),
+                "state": "ERROR",
+            }
+
+    def submit_task(self, question: str, session_id: str, history: Optional[list[dict]] = None) -> str:
+        """提交异步任务：创建 task 并后台启动，立即返回 task_id"""
+        task_id = self.create_task(question, session_id, history)
+        task = asyncio.create_task(self._run_task_background(task_id))
+        # 保存引用，防止 Task 对象被 GC 回收导致后台任务静默取消
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task_id
+
+    def get_task_result(self, task_id: str) -> Optional[dict]:
+        """获取已完成任务的结果（轮询接口 GET /api/status/{task_id} 使用）"""
+        return self._task_results.get(task_id)
+
     async def _run_main_fsm(self, ctx: TaskContext):
         """运行主FSM循环"""
         ctx.current_state = FSMState.IDLE
+        _fsm_start = time.monotonic()
 
         while ctx.current_state != FSMState.COMPLETE:
             logger.debug(f"FSM状态: {ctx.current_state.value}, task={ctx.task_id}")
@@ -195,7 +280,17 @@ class Orchestrator:
                 await self._transition(ctx, FSMState.JUDGING)
 
             elif ctx.current_state == FSMState.JUDGING:
-                verdict = await self._do_judging(ctx)
+                # 方案一：资源生成只依赖 focused_output，与裁判【并发】启动，省一段串行耗时。
+                # 必须在 await 裁判之前 create_task，否则两者串行、优化失效。
+                # fmt_task 在 FORMATTING 状态分支 await 完成；若裁判要求回炉(REVISE)，
+                # 则旧 fmt_task 基于未修订 focused，在 REVISING 分支取消丢弃、定稿后重跑。
+                ctx.fmt_task = asyncio.create_task(self._do_formatting(ctx))
+                try:
+                    verdict = await self._do_judging(ctx)
+                except Exception:
+                    # 裁判失败：取消并发的资源生成任务，避免孤儿任务 + 浪费 LLM 调用
+                    ctx.fmt_task.cancel()
+                    raise
                 if verdict.verdict in (Verdict.PASSED, Verdict.LOW_CONFIDENCE_PASSED):
                     await self._transition(ctx, FSMState.FORMATTING)
                 elif verdict.verdict == Verdict.REVISE and ctx.revision_count < self._settings.fsm_max_revisions:
@@ -207,16 +302,30 @@ class Orchestrator:
                     await self._transition(ctx, FSMState.FORMATTING)
 
             elif ctx.current_state == FSMState.REVISING:
+                # 回炉前取消基于旧 focused 的资源生成任务（避免返回陈旧资源包）
+                if ctx.fmt_task is not None:
+                    ctx.fmt_task.cancel()
+                    try:
+                        await ctx.fmt_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    ctx.fmt_task = None
                 await self._do_revising(ctx)
                 await self._transition(ctx, FSMState.JUDGING)
 
             elif ctx.current_state == FSMState.FORMATTING:
-                await self._do_formatting(ctx)
+                # 等待与裁判并发启动的资源生成完成；零降级：失败则向上抛，由任务以 error 显式失败
+                if ctx.fmt_task is not None:
+                    await ctx.fmt_task
+                    ctx.fmt_task = None
                 await self._transition(ctx, FSMState.COMPLETE)
 
         # 写贡献记忆
         await self._write_contribution_memory(ctx)
         await ws_manager.push_state(ctx.task_id, FSMState.COMPLETE.value)
+        logger.info(
+            f"主FSM完成: task={ctx.task_id}, 耗时={time.monotonic() - _fsm_start:.2f}s"
+        )
 
     # ============================================================
     # 各状态处理
@@ -259,6 +368,17 @@ class Orchestrator:
         """DISPATCHING: 调度员遴选候选Agent"""
         await ws_manager.push_state(ctx.task_id, FSMState.DISPATCHING.value)
         ctx.dispatch_result = self.matcher.dispatch(ctx.profile)
+
+        # 复杂度标签与实际段数对齐：ProfileAgent 可能把多领域问题标成"单领域"，
+        # 导致输出自相矛盾（标签单领域却调度出多段）。以实际段数为准回填标签。
+        seg_count = len(ctx.dispatch_result.segments)
+        if seg_count == 1:
+            ctx.profile.complexity_estimate = ComplexityEstimate.SINGLE_DOMAIN
+        elif ctx.profile.question_type == QuestionType.FULL_PIPELINE:
+            ctx.profile.complexity_estimate = ComplexityEstimate.FULL_PIPELINE
+        elif seg_count > 1:
+            ctx.profile.complexity_estimate = ComplexityEstimate.CROSS_DOMAIN
+
         await ws_manager.push_state(
             ctx.task_id, FSMState.DISPATCHING.value,
             {
@@ -410,7 +530,12 @@ class Orchestrator:
         )
 
     async def _do_focusing(self, ctx: TaskContext):
-        """FOCUSING: 最优Agent聚焦输出（含审核反馈回流）"""
+        """FOCUSING: 最优Agent聚焦输出（含审核反馈回流）
+
+        方案一：多段场景跨段并行聚焦（原先串行 for 循环 → asyncio.gather），
+        单领域仅1段时无变化。零降级：每段聚焦失败加指数退避重试，耗尽才抛错
+        （移除原「降级模式」FocusedOutput 静默兜底，避免核心答案降级）。
+        """
         await ws_manager.push_state(ctx.task_id, FSMState.FOCUSING.value)
 
         ctx.focused_outputs = []
@@ -418,54 +543,14 @@ class Orchestrator:
         ctx.winning_candidates = []
         ctx.losing_candidates = []
 
-        for i, review in enumerate(ctx.review_feedbacks):
-            # 找到获胜候选（早停场景下可能只有1个候选，没有落选候选）
-            winner_candidate = next(c for c in review.candidates if c.is_winner)
-            loser_candidates_list = [c for c in review.candidates if not c.is_winner]
+        # 跨段并行聚焦（每段独立，无数据依赖）
+        tasks = [
+            self._focus_segment(ctx, i, review)
+            for i, review in enumerate(ctx.review_feedbacks)
+        ]
+        results = await asyncio.gather(*tasks)
 
-            # 找到对应的CandidateOutput
-            winner_output = next(
-                co for co in ctx.candidate_outputs[i] if co.agent_id == winner_candidate.agent_id
-            )
-
-            # 单候选（早停）场景：没有落选候选，辩论环节跳过
-            loser_output = None
-            if loser_candidates_list:
-                loser_output = next(
-                    co for co in ctx.candidate_outputs[i] if co.agent_id == loser_candidates_list[0].agent_id
-                )
-            else:
-                logger.info(f"段{review.seg_id}只有1个候选（早停），跳过落选候选记录")
-
-            # 创建获胜Agent实例
-            winning_agent = DomainAgent(winner_candidate.agent_id)
-
-            # 聚焦输出（含审核反馈回流）
-            try:
-                focused = await winning_agent.generate_focused_output(
-                    question=ctx.question,
-                    profile=ctx.profile,
-                    original_output=winner_output,
-                    review_feedback=review,
-                )
-            except Exception as e:
-                logger.warning(
-                    f"段{review.seg_id}聚焦输出失败，降级为候选输出直接送裁判: {e}"
-                )
-                # 从候选输出构造最小可用的FocusedOutput
-                ans = winner_output.answer
-                steps = list(ans.reasoning_steps) if ans.reasoning_steps else []
-                while len(steps) < 3:
-                    steps.append("（降级模式：补充推理步骤）")
-                focused = FocusedOutput(
-                    conclusion=ans.conclusion or "（降级模式：未经聚焦优化）",
-                    reasoning_steps=steps,
-                    knowledge_refs=ans.knowledge_refs,
-                    applicable_conditions=ans.applicable_conditions or "（降级模式）",
-                    code_example=ans.code_example,
-                    difficulty_note=ans.difficulty_note,
-                )
-
+        for focused, winning_agent, winner_output, loser_output in results:
             ctx.focused_outputs.append(focused)
             ctx.winning_agents.append(winning_agent)
             ctx.winning_candidates.append(winner_output)
@@ -478,10 +563,59 @@ class Orchestrator:
             ctx.merged_focused_output = self._merge_focused_outputs(ctx.focused_outputs)
             logger.info(f"多段聚焦输出合并: {len(ctx.focused_outputs)}段 → 1份")
 
+        # 体检 #4：持久化延伸上下文（多进程下 feedback/quiz 可恢复）
+        self._persist_extension_context(ctx.task_id, ctx)
+
         await ws_manager.push_state(
             ctx.task_id, FSMState.FOCUSING.value,
             {"focused_count": len(ctx.focused_outputs)},
         )
+
+    async def _focus_segment(self, ctx: TaskContext, i: int, review) -> tuple:
+        """单段聚焦输出（含零降级重试）
+
+        Returns:
+            (focused, winning_agent, winner_output, loser_output)
+        """
+        winner_candidate = next(c for c in review.candidates if c.is_winner)
+        loser_candidates_list = [c for c in review.candidates if not c.is_winner]
+
+        winner_output = next(
+            co for co in ctx.candidate_outputs[i] if co.agent_id == winner_candidate.agent_id
+        )
+
+        loser_output = None
+        if loser_candidates_list:
+            loser_output = next(
+                co for co in ctx.candidate_outputs[i] if co.agent_id == loser_candidates_list[0].agent_id
+            )
+        else:
+            logger.info(f"段{review.seg_id}只有1个候选（早停），跳过落选候选记录")
+
+        winning_agent = DomainAgent(winner_candidate.agent_id)
+
+        # 零降级重试：聚焦输出失败（API 限流/超时等）指数退避重试，耗尽才抛错
+        last_exc = None
+        for attempt in range(FOCUS_MAX_RETRIES):
+            try:
+                focused = await winning_agent.generate_focused_output(
+                    question=ctx.question,
+                    profile=ctx.profile,
+                    original_output=winner_output,
+                    review_feedback=review,
+                )
+                return focused, winning_agent, winner_output, loser_output
+            except Exception as e:
+                last_exc = e
+                if attempt < FOCUS_MAX_RETRIES - 1:
+                    delay = 2 ** attempt
+                    logger.warning(
+                        f"段{review.seg_id}聚焦输出失败(attempt {attempt + 1}/"
+                        f"{FOCUS_MAX_RETRIES}), {delay}s 后重试: {type(e).__name__}"
+                    )
+                    await asyncio.sleep(delay)
+        logger.error(f"段{review.seg_id}聚焦输出重试耗尽, 任务将失败: {last_exc}")
+        raise last_exc
 
     async def _do_judging(self, ctx: TaskContext) -> JudgeVerdict:
         """JUDGING: 裁判团3人并行审查 + 分歧解决 + 候选辩论
@@ -602,11 +736,15 @@ class Orchestrator:
         else:
             ctx.merged_focused_output = self._merge_focused_outputs(ctx.focused_outputs)
 
+        # 体检 #4：持久化延伸上下文（多进程下 feedback/quiz 可恢复）
+        self._persist_extension_context(ctx.task_id, ctx)
+
     async def _do_formatting(self, ctx: TaskContext):
         """FORMATTING: 资源生成Agent按条件生成3种形态
 
         多段场景：使用合并后的聚焦输出统一生成资源包。
-        降级策略（方案书§8.5.3）：资源生成失败时仅生成讲义，不中断流程。
+        零降级（用户硬指标）：资源生成失败直接抛出，由任务以 error 显式失败，
+        不返回「仅讲义」等残缺资源包——残缺资源比报错更损害教学可信度。
         """
         await ws_manager.push_state(ctx.task_id, FSMState.FORMATTING.value)
 
@@ -614,34 +752,14 @@ class Orchestrator:
         if not focused:
             raise OrchestratorError("无聚焦输出可供资源生成")
 
-        try:
-            ctx.resource_package = await self.resource_agent.generate_resource_package(
-                task_id=ctx.task_id,
-                focused_output=focused,
-                profile=ctx.profile,
-            )
-        except Exception as e:
-            logger.warning(f"资源生成失败，降级为仅生成讲义: {e}")
-            from backend.schemas.resource_package import Lecture, KnowledgeRefDisplay
-            ctx.resource_package = ResourcePackage(
-                task_id=ctx.task_id,
-                lecture=Lecture(
-                    title="学习资源（降级模式）",
-                    content_markdown=focused.conclusion,
-                    difficulty_note=focused.difficulty_note or "（降级模式）",
-                    knowledge_refs_display=[
-                        KnowledgeRefDisplay(
-                            source=ref.source,
-                            verification_status="待验证",
-                        )
-                        for ref in focused.knowledge_refs
-                    ],
-                ),
-                practice_guide=None,
-                quiz=None,
-                focused_output_ref=ctx.task_id,
-                profile_ref=ctx.session_id,
-            )
+        # 零降级：generate_resource_package 内部已对三件套做重试，耗尽才抛错；
+        # 此处不再捕获降级，直接向上传播（最终在 process_question / _run_task_background 的
+        # except 中标记为 ERROR 任务，前端可感知并重跑）。
+        ctx.resource_package = await self.resource_agent.generate_resource_package(
+            task_id=ctx.task_id,
+            focused_output=focused,
+            profile=ctx.profile,
+        )
 
         await ws_manager.push_state(
             ctx.task_id, FSMState.FORMATTING.value,
@@ -735,6 +853,19 @@ class Orchestrator:
 
         return {"error": f"未知事件类型: {event_type}"}
 
+    # ---- 跨进程上下文快照（体检 #4 修复）----
+    def _persist_extension_context(self, task_id: str, ctx) -> None:
+        """主生成结束时把延伸路径必需的 profile+focused_output 落盘，供多 worker 共享"""
+        from backend.services.task_context_store import save_extension_context
+
+        save_extension_context(task_id, ctx.profile, ctx.merged_focused_output)
+
+    def _load_extension_context(self, task_id: str):
+        """内存 ctx 缺失时（多进程）尝试从快照恢复；失败返回 None→维持 heuristic 兜底"""
+        from backend.services.task_context_store import load_extension_context
+
+        return load_extension_context(task_id)
+
     async def _handle_quiz_submit(self, task_id: str, event_data: dict) -> dict:
         """QUIZ_EVAL: 答题验证"""
         accuracy = event_data.get("accuracy", 0.0)
@@ -763,7 +894,7 @@ class Orchestrator:
         """
         await ws_manager.push_state(task_id, FSMState.REDIMENSION.value)
 
-        ctx = self._task_contexts.get(task_id)
+        ctx = self._task_contexts.get(task_id) or self._load_extension_context(task_id)
         if not ctx or not ctx.merged_focused_output or not ctx.profile:
             logger.warning(f"降维解释: task={task_id} 上下文不存在，跳过LLM调用")
             return await self._do_heuristic_followup(task_id, event_data)
@@ -784,7 +915,10 @@ class Orchestrator:
 
         logger.info(f"降维解释完成: task={task_id}, accuracy={accuracy:.0%}")
         await ws_manager.push_state(task_id, FSMState.REDIMENSION.value, result)
-        return await self._do_heuristic_followup(task_id, event_data)
+        # 启发式追问作为收尾，合并其追问问题，并保留降维资源包一并返回
+        followup = await self._do_heuristic_followup(task_id, event_data)
+        result["followup_questions"] = followup.get("followup_questions")
+        return result
 
     async def _do_advance(self, task_id: str, event_data: dict) -> dict:
         """ADVANCE: 进阶挑战
@@ -793,7 +927,7 @@ class Orchestrator:
         """
         await ws_manager.push_state(task_id, FSMState.ADVANCE.value)
 
-        ctx = self._task_contexts.get(task_id)
+        ctx = self._task_contexts.get(task_id) or self._load_extension_context(task_id)
         if not ctx or not ctx.merged_focused_output or not ctx.profile:
             logger.warning(f"进阶挑战: task={task_id} 上下文不存在，跳过LLM调用")
             return await self._do_heuristic_followup(task_id, event_data)
@@ -812,7 +946,10 @@ class Orchestrator:
 
         logger.info(f"进阶挑战完成: task={task_id}")
         await ws_manager.push_state(task_id, FSMState.ADVANCE.value, result)
-        return await self._do_heuristic_followup(task_id, event_data)
+        # 启发式追问作为收尾，合并其追问问题，并保留进阶挑战题一并返回
+        followup = await self._do_heuristic_followup(task_id, event_data)
+        result["followup_questions"] = followup.get("followup_questions")
+        return result
 
     async def _do_recheck(self, task_id: str, event_data: dict) -> dict:
         """RECHECK: 审核复检
@@ -822,7 +959,7 @@ class Orchestrator:
         """
         await ws_manager.push_state(task_id, FSMState.RECHECK.value)
 
-        ctx = self._task_contexts.get(task_id)
+        ctx = self._task_contexts.get(task_id) or self._load_extension_context(task_id)
         if not ctx or not ctx.merged_focused_output:
             logger.warning(f"审核复检: task={task_id} 上下文不存在，跳过LLM调用")
             return await self._do_heuristic_followup(task_id, event_data)
@@ -854,7 +991,7 @@ class Orchestrator:
         """
         await ws_manager.push_state(task_id, FSMState.HEURISTIC_FOLLOWUP.value)
 
-        ctx = self._task_contexts.get(task_id)
+        ctx = self._task_contexts.get(task_id) or self._load_extension_context(task_id)
         if not ctx or not ctx.merged_focused_output or not ctx.profile:
             logger.warning(f"启发式追问: task={task_id} 上下文不存在，跳过LLM调用")
             return {"action": "heuristic_followup", "followup_questions": []}

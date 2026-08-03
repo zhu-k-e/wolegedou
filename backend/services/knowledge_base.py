@@ -108,6 +108,16 @@ class KnowledgeBaseInterface(ABC):
         """
         ...
 
+    @abstractmethod
+    def add_chunks(self, chunks: list) -> int:
+        """批量导入已分块的文档（DocumentChunk 列表）
+
+        供 kb_manager.import_documents / import_file 调用，与 add_documents 互补：
+        add_documents 接收原始文档 dict，add_chunks 接收已切分（DocumentChunk）的列表。
+        NumpyKB / ChromaKB 均已实现此方法；新增实现须同时实现两者。
+        """
+        ...
+
 
 class StubKnowledgeBase(KnowledgeBaseInterface):
     """知识库Stub实现 - 知识库团队未接入前的占位
@@ -140,6 +150,10 @@ class StubKnowledgeBase(KnowledgeBaseInterface):
         documents: list[dict],
         agent_ids: Optional[list[str]] = None,
     ) -> int:
+        return 0
+
+    def add_chunks(self, chunks: list) -> int:
+        # Stub 模式不持久化，导入在 import_documents/import_file 中已提前返回
         return 0
 
 

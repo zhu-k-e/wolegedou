@@ -168,6 +168,23 @@ def _try_init_chroma() -> bool:
 # ------------------------------------------------------------------
 
 
+def _resolve_safe_path(path: str | Path) -> Path:
+    """将导入路径解析为绝对路径，并约束在项目根目录内，防止路径遍历任意文件读取。
+
+    允许项目根目录内的相对/绝对路径；一旦解析结果逃出项目根目录（如 ``../`` 上级目录、
+    或绝对路径指向系统目录），抛出 ValueError，调用方据此拒绝导入，loader 不会读取任何文件。
+    """
+    settings = get_settings()
+    root = settings.project_root.resolve()
+    p = Path(path)
+    resolved = p.resolve() if p.is_absolute() else (root / p).resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(
+            f"导入路径越界：'{path}' 解析为 '{resolved}'，必须在项目目录内"
+        )
+    return resolved
+
+
 def import_documents(
     dir_path: str | Path,
     agent_ids: Optional[list[str]] = None,
@@ -196,8 +213,18 @@ def import_documents(
 
     from backend.services.rag.document_loader import DocumentLoader
 
+    try:
+        safe_path = _resolve_safe_path(dir_path)
+    except ValueError as e:
+        return {
+            "success": False,
+            "imported_count": 0,
+            "total_chunks": kb.chunk_count,
+            "message": str(e),
+        }
+
     loader = DocumentLoader()
-    chunks = loader.load_from_directory(dir_path, agent_ids=agent_ids)
+    chunks = loader.load_from_directory(safe_path, agent_ids=agent_ids)
 
     if not chunks:
         return {
@@ -242,8 +269,18 @@ def import_file(
 
     from backend.services.rag.document_loader import DocumentLoader
 
+    try:
+        safe_path = _resolve_safe_path(file_path)
+    except ValueError as e:
+        return {
+            "success": False,
+            "imported_count": 0,
+            "total_chunks": kb.chunk_count,
+            "message": str(e),
+        }
+
     loader = DocumentLoader()
-    chunks = loader.load_from_file(file_path, agent_ids=agent_ids)
+    chunks = loader.load_from_file(safe_path, agent_ids=agent_ids)
 
     if not chunks:
         return {

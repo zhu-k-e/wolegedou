@@ -31,6 +31,7 @@ class LLMClient:
         self._mid_client = AsyncOpenAI(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
+            max_retries=1,  # 关掉 SDK 默认重试叠加，避免单次卡慢时 60×3=180s
         )
         self._mid_model = settings.deepseek_model
 
@@ -38,6 +39,7 @@ class LLMClient:
         self._high_client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
+            max_retries=1,  # 同上
         )
         self._high_model = settings.openai_model
 
@@ -79,8 +81,25 @@ class LLMClient:
                 kwargs["response_format"] = response_format
 
             response = await client.chat.completions.create(**kwargs)
-            content = response.choices[0].message.content
-            logger.debug(f"LLM调用成功 [tier={tier.value}, model={model}], 输出长度={len(content)}")
+            choice = response.choices[0]
+            content = choice.message.content
+
+            # 输出截断检测：finish_reason == "length" 表示达到 max_tokens 上限被硬截断。
+            # 截断的 JSON 必然残缺（缺右括号/引号），会导致三层兜底校验全部失败并抛
+            # SchemaValidationError。此前该情况完全静默，只能看到"三层兜底均失败"的
+            # 表象而无法定位根因，故显式告警。
+            finish_reason = getattr(choice, "finish_reason", None)
+            if finish_reason == "length":
+                logger.warning(
+                    f"LLM输出被截断(达到max_tokens上限) [tier={tier.value}, "
+                    f"model={model}, max_tokens={max_tokens}, 实际输出长度={len(content or '')}]"
+                    f" —— JSON 极可能残缺，请上调 max_tokens"
+                )
+
+            logger.debug(
+                f"LLM调用成功 [tier={tier.value}, model={model}], "
+                f"输出长度={len(content or '')}, finish_reason={finish_reason}"
+            )
             return content
 
         except Exception as e:

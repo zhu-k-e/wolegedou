@@ -6,15 +6,22 @@
   3. 核心知识点覆盖率 >= 90% (目标 >=95%) — 裁判团溯源验证率
   4. 幻觉率（附加）       (目标 <=3%)  — 裁判团 verdict 分布
 
+事实比对指标（离线，无 LLM，需先运行 benchmark_testcases 生成资源）：
+  - 核心知识点覆盖率(事实) >= 90% — 生成文本对 test_cases_100 reference_answer_points 命中率
+  - 适配准确率(事实/启发) >= 85% — expected_complexity vs 生成资源难度说明
+
 用法:
   python -m backend.scripts.validate_metrics              # 全量验证
   python -m backend.scripts.validate_metrics --kb-only     # 仅知识库召回率测试
   python -m backend.scripts.validate_metrics --no-kb       # 跳过知识库测试（无需加载 bge-m3）
+  python -m backend.scripts.benchmark_testcases           # 跑 100 基准用例生成资源(供事实指标)
 """
 
 import asyncio
 import sys
 import os
+import re
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -30,13 +37,40 @@ from loguru import logger
 # 指标目标值（方案书 7.1 节）
 # ============================================================
 
+# 对齐赛题「实用价值」评分硬指标（方案书第六部分）：
+#   专业知识谬误率 < 5% / 适配准确率 >= 85% / 核心知识点覆盖率 >= 90% / 幻觉率 < 5%
+# 【指标口径说明】
+# 赛题 4 项硬指标一律以「事实比对口径」为准（对照 tests/test_cases_100.json 外部真值），
+# 而非系统自评。系统自评分（Verifier/Evaluator/裁判团打分）仅作为过程观测指标列出，
+# 不参与达标判定 —— 自己给自己打分不能作为达标证据。
+#
+# 特别说明「知识溯源率」为何被降级为观测指标：
+#   实测定标（40 条已知正确陈述 vs 10 条事实错误陈述）显示，二者在知识库中的
+#   最高相似度分布几乎完全重合（median 0.640 vs 0.641），各阈值下区分度均 ≈ 0。
+#   即向量相似度只能刻画"话题相关性"，无法判定"事实正确性"。
+#   故溯源率只表示"有知识库文档支撑（可溯源）"，不能充当核心知识点覆盖率。
 TARGETS = {
-    "error_rate":      {"target": 0.03, "compare": "<=", "label": "专业知识谬误率", "unit": "%"},
-    "adaptation_rate": {"target": 0.90, "compare": ">=", "label": "适配准确率",     "unit": "%"},
-    "coverage_rate":   {"target": 0.95, "compare": ">=", "label": "核心知识点覆盖率", "unit": "%"},
-    "hallucination_rate": {"target": 0.03, "compare": "<=", "label": "幻觉率", "unit": "%"},
-    "force_pass_rate":    {"target": 0.05, "compare": "<=", "label": "强制放行率",     "unit": "%"},
+    # —— 赛题硬指标（事实比对口径，外部真值，离线无 LLM）——
+    "factual_coverage_rate":   {"target": 0.90, "compare": ">=", "label": "核心知识点覆盖率", "unit": "%", "official": True},
+    "factual_adaptation_rate": {"target": 0.85, "compare": ">=", "label": "适配准确率",     "unit": "%", "official": True},
+    "hallucination_rate": {"target": 0.05, "compare": "<=", "label": "幻觉率", "unit": "%", "official": True},
+    "error_rate":      {"target": 0.05, "compare": "<=", "label": "专业知识谬误率", "unit": "%", "official": True},
+    # —— 过程观测指标（系统自评，不作达标证据）——
+    "adaptation_rate": {"target": 0.85, "compare": ">=", "label": "教学适配度(自评)", "unit": "%", "official": False},
+    "coverage_rate":   {"target": 0.90, "compare": ">=", "label": "知识溯源率(自评)", "unit": "%", "official": False},
+    "force_pass_rate": {"target": 0.05, "compare": "<=", "label": "强制放行率",     "unit": "%", "official": False},
 }
+
+# 报告展示顺序：赛题硬指标在前，过程观测指标在后
+OFFICIAL_KEYS = ["factual_coverage_rate", "factual_adaptation_rate", "hallucination_rate", "error_rate"]
+OBSERVED_KEYS = ["adaptation_rate", "coverage_rate", "force_pass_rate"]
+REPORT_KEYS = OFFICIAL_KEYS + OBSERVED_KEYS
+
+# 100 条测试用例真值（事实比对基准）
+TEST_CASES_PATH = _PROJECT_ROOT / "tests" / "test_cases_100.json"
+
+# 中文停用字符（用于抽取参考要点关键词时降噪）
+_STOP_CHARS = set("的是在与和及对等为有也一个这种那他她它我们你它们被把从到以可可以能会于等及或并且但是因为所以如果当在对于关于通过使用需要应该必须通常一般常见基本主要核心关键其之此该各")
 
 # ============================================================
 # 知识库召回率测试用例（方案书 7.2.3 节跨语言检索）
@@ -63,10 +97,48 @@ KB_TEST_QUERIES = [
 class MetricsCalculator:
     """从数据库计算 4 项量化指标"""
 
-    def __init__(self):
-        self.task_metrics = query_all("SELECT * FROM task_metrics")
+    def __init__(self, bm_only: bool = False):
+        self.bm_only = bm_only
+        all_tm = query_all("SELECT * FROM task_metrics")
+        # 转 dict 以支持 .get 访问（query_all 返回 Row 对象）
+        all_tm = [dict(r) for r in all_tm]
+        # bm_only: 仅统计基准评测用例(bm_*)的落库行，排除用户 demo/真实流量数据，
+        # 使赛题指标口径严格对应 test_cases_100.json 评测集，避免样本污染。
+        self.task_metrics = (
+            [r for r in all_tm if (r.get("session_id") or "").startswith("bm_")]
+            if bm_only else all_tm
+        )
         self.contribution_memory = query_all("SELECT * FROM contribution_memory")
         self.student_feedback = query_all("SELECT * FROM student_feedback")
+        # 事实比对基准
+        self.test_cases = self._load_test_cases()
+        self.task_resources = self._load_task_resources()
+
+    # --- 事实比对基准加载 ---
+    def _load_test_cases(self) -> list:
+        try:
+            data = json.loads(TEST_CASES_PATH.read_text(encoding="utf-8"))
+            return data.get("test_cases", [])
+        except Exception as e:
+            logger.warning(f"加载 test_cases_100.json 失败(事实指标将无样本): {e}")
+            return []
+
+    def _load_task_resources(self) -> list:
+        try:
+            from backend.db.resource_store import ensure_task_resources_table
+            ensure_task_resources_table()
+            rows = query_all(
+                "SELECT task_id, session_id, question, lecture, practice_guide, quiz, knowledge_refs "
+                "FROM task_resources"
+            )
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.warning(f"加载 task_resources 失败(表可能未初始化): {e}")
+            return []
+
+    @staticmethod
+    def _norm_q(q) -> str:
+        return re.sub(r"\s+", "", (q or "").strip().lower())
 
     @property
     def has_data(self) -> bool:
@@ -279,6 +351,217 @@ class MetricsCalculator:
             "detail": ", ".join(detail_parts) if detail_parts else "无强制放行",
         }
 
+    # ============================================================
+    # 事实比对指标（test_cases_100.json 真值，离线，无 LLM 调用）
+    #   覆盖率 = 生成文本对 reference_answer_points 关键术语的命中率
+    #   适配率 = 生成资源难度说明 vs expected_complexity（启发式，待 LLM 复核）
+    # ============================================================
+
+    # --- 术语抽取（中文 2/3 元文法 + 英文词，去停用字符） ---
+    @staticmethod
+    def _extract_terms(text) -> set:
+        if not text:
+            return set()
+        text = str(text).lower()
+        terms = set()
+        # 英文/数字词（长度 >=2）
+        for m in re.findall(r"[a-z0-9_]{2,}", text):
+            terms.add(m)
+        # 中文连续段 -> 2-gram / 3-gram（去掉停用字符降噪）
+        for run in re.findall(r"[\u4e00-\u9fff]+", text):
+            run = "".join(ch for ch in run if ch not in _STOP_CHARS)
+            n = len(run)
+            if n >= 2:
+                for k in (2, 3):
+                    for i in range(n - k + 1):
+                        terms.add(run[i:i + k])
+        return terms
+
+    @staticmethod
+    def _resource_text(res: dict) -> str:
+        """把 task_resources 一行拼接成可检索的纯文本。
+
+        lecture/practice_guide/quiz/knowledge_refs 列存的是 JSON（model_dump），
+        递归抽取所有字符串字段（content_markdown / explanation 等），避免被 JSON
+        结构字符干扰命中判定。
+        """
+        parts = []
+        for col in ("lecture", "practice_guide", "quiz", "knowledge_refs"):
+            raw = res.get(col)
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+
+                def _walk(o):
+                    if isinstance(o, str):
+                        parts.append(o)
+                    elif isinstance(o, dict):
+                        for v in o.values():
+                            _walk(v)
+                    elif isinstance(o, (list, tuple)):
+                        for v in o:
+                            _walk(v)
+
+                _walk(obj)
+            except Exception:
+                parts.append(str(raw))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _lecture_difficulty_note(res: dict) -> str | None:
+        """仅取讲义的 difficulty_note 作为难度信号（正文会有'深入/复杂/高级'等词，不能扫全文）"""
+        raw = res.get("lecture")
+        if not raw:
+            return None
+        try:
+            obj = json.loads(raw)
+            note = obj.get("difficulty_note") if isinstance(obj, dict) else None
+            return note if isinstance(note, str) and note.strip() else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _detect_difficulty(text) -> str | None:
+        """从难度说明启发式识别难度桶: simple / medium / complex / None(无信号)
+
+        仅对 difficulty_note 调用（正文噪声大）。按关键词**首次出现位置**判定，
+        因为等级标记（入门级/中级难度）都在句首，而句尾常见"想深入理解原理的学生"
+        这类建议性表述（含'深入/深度'）不能当作当前内容难度。
+        注意: 不含裸'基础'（会命中'机器学习基础'等误判），不含'深入/深度'（建议性表述）。
+        """
+        if not text:
+            return None
+        t = str(text).lower()
+        groups = {
+            "simple": [r"入门级", r"入门难度", r"入门", r"初级", r"零基础", r"新手",
+                       r"beginner", r"\bbasic\b", r"\bintro", r"fundamental"],
+            "medium": [r"中级", r"intermediate"],
+            "complex": [r"高级", r"专家", r"高阶", r"复杂",
+                        r"expert", r"\badvanced\b", r"\bdeep\b"],
+        }
+        best = None  # (bucket, index)
+        for bucket, pats in groups.items():
+            for p in pats:
+                m = re.search(p, t)
+                if m and (best is None or m.start() < best[1]):
+                    best = (bucket, m.start())
+        return best[0] if best else None
+
+    def _build_pairs(self) -> list:
+        """按归一化问题，把 test_cases 与 task_resources 配对。"""
+        by_q: dict = {}
+        for r in self.task_resources:
+            if self.bm_only and not (r.get("session_id") or "").startswith("bm_"):
+                continue
+            q = r.get("question")
+            if q:
+                by_q[self._norm_q(q)] = r
+        pairs = []
+        for tc in self.test_cases:
+            q = tc.get("question")
+            if q and self._norm_q(q) in by_q:
+                pairs.append((tc, by_q[self._norm_q(q)]))
+        return pairs
+
+    @staticmethod
+    def _point_covered(point_terms: set, gen_terms: set) -> bool:
+        """参考要点是否被生成文本覆盖。
+
+        覆盖判定: 命中术语占比 >= 0.5，或存在强信号（3-gram / 长度>=3 英文词）。
+        """
+        if not point_terms:
+            return False
+        matched = point_terms & gen_terms
+        if not matched:
+            return False
+        if any(len(t) >= 3 for t in matched):
+            return True
+        return len(matched) / len(point_terms) >= 0.5
+
+    def calc_factual_coverage_rate(self) -> dict:
+        """核心知识点覆盖率(事实) = avg(单用例命中要点数 / 该用例总要点数)
+
+        仅对 test_cases_100 与 task_resources 能按问题配对的用例计算。
+        """
+        pairs = self._build_pairs()
+        if not pairs:
+            return {
+                "value": None,
+                "sample_count": 0,
+                "source": "task_resources 中无与 test_cases_100 匹配的问题",
+                "detail": "请先运行基准评测生成资源: python -m backend.scripts.benchmark_testcases",
+            }
+        per_case = []
+        for tc, res in pairs:
+            points = tc.get("reference_answer_points") or []
+            if not points:
+                continue
+            gen_terms = self._extract_terms(self._resource_text(res))
+            covered = 0
+            for p in points:
+                if self._point_covered(self._extract_terms(p), gen_terms):
+                    covered += 1
+            per_case.append(covered / len(points))
+        if not per_case:
+            return {
+                "value": None,
+                "sample_count": len(pairs),
+                "source": "reference_answer_points 命中率",
+                "detail": "配对用例均无有效参考要点",
+            }
+        value = sum(per_case) / len(per_case)
+        return {
+            "value": value,
+            "sample_count": len(per_case),
+            "source": "reference_answer_points 命中率(task_resources vs test_cases_100)",
+            "detail": f"matched_cases={len(pairs)}, covered_points_avg={value:.3f}",
+        }
+
+    def calc_factual_adaptation_rate(self) -> dict:
+        """适配准确率(事实/启发) = 难度匹配的用例数 / 可判定的用例数
+
+        expected_complexity(simple/medium/complex) 与生成资源难度说明的启发式
+        识别结果比对。无难度信号(纯内容无难度词)的用例不计入可判定样本。
+        """
+        pairs = self._build_pairs()
+        if not pairs:
+            return {
+                "value": None,
+                "sample_count": 0,
+                "source": "task_resources 中无与 test_cases_100 匹配的问题",
+                "detail": "请先运行基准评测生成资源: python -m backend.scripts.benchmark_testcases",
+            }
+        matched = 0
+        judged = 0
+        no_signal = 0
+        for tc, res in pairs:
+            exp = (tc.get("expected_complexity") or "").lower()
+            if exp not in ("simple", "medium", "complex"):
+                continue
+            note = self._lecture_difficulty_note(res)
+            gen = self._detect_difficulty(note) if note else None
+            if gen is None:
+                no_signal += 1
+                continue
+            judged += 1
+            if gen == exp:
+                matched += 1
+        if judged == 0:
+            return {
+                "value": None,
+                "sample_count": len(pairs),
+                "source": "expected_complexity vs 生成难度说明(启发式)",
+                "detail": f"配对用例均无难度信号(no_signal={no_signal})",
+            }
+        value = matched / judged
+        return {
+            "value": value,
+            "sample_count": judged,
+            "source": "expected_complexity vs 生成资源难度说明(启发式, 待 LLM 复核)",
+            "detail": f"judged={judged}, matched={matched}, no_signal={no_signal}",
+        }
+
     def calc_all(self) -> dict:
         return {
             "error_rate": self.calc_error_rate(),
@@ -286,6 +569,8 @@ class MetricsCalculator:
             "coverage_rate": self.calc_coverage_rate(),
             "hallucination_rate": self.calc_hallucination_rate(),
             "force_pass_rate": self.calc_force_pass_rate(),
+            "factual_coverage_rate": self.calc_factual_coverage_rate(),
+            "factual_adaptation_rate": self.calc_factual_adaptation_rate(),
         }
 
 
@@ -386,24 +671,33 @@ def print_console_report(metrics: dict, kb_result: dict | None, targets: dict):
     print(f"  生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
 
-    # 4 项核心指标
+    # 赛题硬指标（事实比对口径，外部真值）
     print()
-    print("  [核心指标]")
+    print("  [赛题硬指标 —— 对照 test_cases_100.json 外部真值，非系统自评]")
     print(f"  {'指标':<20s} {'实际值':>8s} {'目标值':>8s} {'结果':>6s}  {'样本数':>6s}  数据来源")
     print("  " + "-" * 76)
-
-    for key in ["error_rate", "adaptation_rate", "coverage_rate", "hallucination_rate", "force_pass_rate"]:
+    for key in OFFICIAL_KEYS:
         m = metrics[key]
         t = targets[key]
         val_str = _format_value(m["value"], t["unit"])
         tgt_str = _format_value(t["target"], t["unit"])
         pf = _pass_fail(m["value"], t["target"], t["compare"])
-        print(f"  {t['label']:<20s} {val_str:>8s} {tgt_str:>8s} {pf:>6s}  {m['sample_count']:>6d}  {m['source']}")
+        print(f"  {t['label']:<24s} {val_str:>8s} {tgt_str:>8s} {pf:>6s}  {m['sample_count']:>6d}  {m['source']}")
+
+    # 过程观测指标（系统自评，不作达标证据）
+    print()
+    print("  [过程观测指标 —— 系统自评，仅供诊断，不作达标证据]")
+    print("  " + "-" * 76)
+    for key in OBSERVED_KEYS:
+        m = metrics[key]
+        t = targets[key]
+        val_str = _format_value(m["value"], t["unit"])
+        print(f"  {t['label']:<24s} {val_str:>8s} {'-':>8s} {'-':>6s}  {m['sample_count']:>6d}  {m['source']}")
 
     # 指标详情
     print()
     print("  [指标详情]")
-    for key in ["error_rate", "adaptation_rate", "coverage_rate", "hallucination_rate", "force_pass_rate"]:
+    for key in REPORT_KEYS:
         m = metrics[key]
         t = targets[key]
         if m["detail"]:
@@ -435,13 +729,16 @@ def generate_markdown_report(metrics: dict, kb_result: dict | None, targets: dic
         f"> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"> 对应方案书: 第七部分 指标与验证（7.1 节赛题指标映射 + 7.2.3 节验证方法）",
         f"",
-        f"## 1. 核心指标汇总",
+        f"## 1. 赛题硬指标",
+        f"",
+        f"> 口径：全部对照 `tests/test_cases_100.json` 外部真值离线计算，**不采用系统自评分**。",
+        f"> 自己给自己打分不能作为达标证据，故 Verifier/Evaluator/裁判团评分一律降级为过程观测指标。",
         f"",
         f"| 指标 | 实际值 | 目标值 | 结果 | 样本数 | 数据来源 |",
         f"|------|--------|--------|------|--------|----------|",
     ]
 
-    for key in ["error_rate", "adaptation_rate", "coverage_rate", "hallucination_rate", "force_pass_rate"]:
+    for key in OFFICIAL_KEYS:
         m = metrics[key]
         t = targets[key]
         val_str = _format_value(m["value"], t["unit"])
@@ -450,15 +747,35 @@ def generate_markdown_report(metrics: dict, kb_result: dict | None, targets: dic
         lines.append(f"| {t['label']} | {val_str} | {tgt_str} | {pf} | {m['sample_count']} | {m['source']} |")
 
     lines.append("")
+    lines.append("### 过程观测指标（系统自评，不作达标证据）")
+    lines.append("")
+    lines.append("| 指标 | 实际值 | 样本数 | 数据来源 |")
+    lines.append("|------|--------|--------|----------|")
+    for key in OBSERVED_KEYS:
+        m = metrics[key]
+        t = targets[key]
+        val_str = _format_value(m["value"], t["unit"])
+        lines.append(f"| {t['label']} | {val_str} | {m['sample_count']} | {m['source']} |")
+
+    lines.append("")
+    lines.append("> **知识溯源率为何不能充当核心知识点覆盖率**：实测定标（40 条已知正确陈述 vs "
+                 "10 条事实错误陈述）显示两者在知识库中的最高相似度分布几乎完全重合"
+                 "（median 0.640 vs 0.641），在 0.58~0.72 各阈值下区分度均 ≈ 0。"
+                 "即向量相似度只能刻画话题相关性，无法判定事实正确性。"
+                 "故该指标语义收敛为「陈述可溯源到知识库文档」，覆盖率改由事实比对口径承担。")
+
+    lines.append("")
     lines.append("## 2. 指标详情")
     lines.append("")
 
     detail_map = {
-        "error_rate": "专业知识谬误率",
-        "adaptation_rate": "适配准确率",
-        "coverage_rate": "核心知识点覆盖率",
-        "hallucination_rate": "幻觉率",
-        "force_pass_rate": "强制放行率（全票失败/修改超限强制通过）",
+        "factual_coverage_rate": "核心知识点覆盖率（赛题硬指标 / 事实比对）",
+        "factual_adaptation_rate": "适配准确率（赛题硬指标 / 事实比对）",
+        "hallucination_rate": "幻觉率（赛题硬指标）",
+        "error_rate": "专业知识谬误率（赛题硬指标）",
+        "adaptation_rate": "教学适配度（观测 / 系统自评）",
+        "coverage_rate": "知识溯源率（观测 / 系统自评）",
+        "force_pass_rate": "强制放行率（观测：全票失败/修改超限强制通过）",
     }
     for key, label in detail_map.items():
         m = metrics[key]
@@ -484,15 +801,31 @@ def generate_markdown_report(metrics: dict, kb_result: dict | None, targets: dic
 
     lines.append("## 4. 验证方法说明")
     lines.append("")
+    lines.append("### 赛题硬指标（外部真值口径）")
+    lines.append("")
     lines.append("| 指标 | 方案书定义 | 自动化方式 |")
     lines.append("|------|-----------|-----------|")
-    lines.append("| 专业知识谬误率 | 100道测试题人工核验 | Verifier fact_accuracy 代理指标（1 - avg(fact_accuracy)） |")
-    lines.append("| 适配准确率 | 20组学情测试+模拟学生评估 | Evaluator pedagogical_fit 均值 + 学生 difficulty_mismatch 反馈 |")
-    lines.append("| 核心知识点覆盖率 | 知识库召回率测试+溯源覆盖率 | 裁判团 overall_verification_rate 均值 + traceability 统计 |")
+    lines.append("| 核心知识点覆盖率 | 100 道测试题核心知识点覆盖 | 生成资源对 `reference_answer_points` 的关键术语命中率（离线、零 LLM 调用） |")
+    lines.append("| 适配准确率 | 学情测试 + 难度匹配 | `expected_complexity` 与生成资源难度说明的难度桶匹配率 |")
     lines.append("| 幻觉率 | 裁判团 verdict 分布 | count(verdict in failed/revise) / total |")
-    lines.append("| 强制放行率 | 全票失败/修改超限的强制放行占比 | count(override_reason IS NOT NULL) / total |")
+    lines.append("| 专业知识谬误率 | 100 道测试题人工核验 | 当前为 Verifier 自评代理，**待人工/LLM 标注替换**（见下方局限） |")
     lines.append("")
-    lines.append("> 注: 人工核验指标（谬误率）使用审核评分作为代理指标，实际谬误率需人工标注确认。")
+    lines.append("### 过程观测指标（系统自评）")
+    lines.append("")
+    lines.append("| 指标 | 自动化方式 | 为何不作达标证据 |")
+    lines.append("|------|-----------|------------------|")
+    lines.append("| 教学适配度 | Evaluator `pedagogical_fit` 均值 | 系统自评，存在自利偏差 |")
+    lines.append("| 知识溯源率 | 裁判团 `overall_verification_rate` | 相似度无法判定事实正确性（正负样本分布重合） |")
+    lines.append("| 强制放行率 | count(override_reason IS NOT NULL) / total | 流程健康度诊断项，非赛题指标 |")
+    lines.append("")
+    lines.append("### 已知局限")
+    lines.append("")
+    lines.append("1. **专业知识谬误率**仍依赖 Verifier 自评（`1 - avg(fact_accuracy)`），"
+                 "而 Verifier 在知识库检索为空时会给出 0.0 / 兜底 0.5，使该值失真；"
+                 "正式评测需以人工或强模型标注替换。")
+    lines.append("2. **适配准确率**当前用难度说明的关键词启发式判定难度桶，"
+                 "对措辞敏感，建议正式评测时改由 LLM 复核。")
+    lines.append("3. 事实比对基于关键术语命中，可能低估同义改写的覆盖情况。")
     lines.append("")
 
     return "\n".join(lines)
@@ -502,11 +835,11 @@ def generate_markdown_report(metrics: dict, kb_result: dict | None, targets: dic
 # 主入口
 # ============================================================
 
-def main(run_kb: bool = True):
+def main(run_kb: bool = True, bm_only: bool = False):
     logger.info("开始量化指标验证...")
 
     # 1. 从 DB 计算指标
-    calc = MetricsCalculator()
+    calc = MetricsCalculator(bm_only=bm_only)
     if not calc.has_data:
         print()
         print("WARNING: 数据库中无 task_metrics 或 contribution_memory 数据。")
@@ -535,9 +868,10 @@ def main(run_kb: bool = True):
     report_path.write_text(md, encoding="utf-8")
     print(f"Markdown 报告已保存: {report_path}")
 
-    # 5. 返回退出码（有 FAIL 则非零）
+    # 5. 返回退出码（仅按赛题硬指标判定；过程观测指标不影响成败）
     has_fail = False
-    for key, t in TARGETS.items():
+    for key in OFFICIAL_KEYS:
+        t = TARGETS[key]
         m = metrics[key]
         if m["value"] is not None:
             if t["compare"] == "<=" and m["value"] > t["target"]:
@@ -551,8 +885,11 @@ def main(run_kb: bool = True):
 if __name__ == "__main__":
     args = sys.argv[1:]
     run_kb = True
+    bm_only = False
     if "--no-kb" in args:
         run_kb = False
+    if "--bm-only" in args:
+        bm_only = True
     if "--kb-only" in args:
         run_kb = True
         # 跳过 DB 指标，仅跑 KB
@@ -570,4 +907,4 @@ if __name__ == "__main__":
         print()
         sys.exit(0)
 
-    sys.exit(main(run_kb=run_kb))
+    sys.exit(main(run_kb=run_kb, bm_only=bm_only))

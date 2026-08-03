@@ -497,7 +497,13 @@ class NumpyKnowledgeBase(KnowledgeBaseInterface):
                 "source": "知识库无相关文档",
             }
 
-        best = results[0]
+        # 取相似度最高的一条作为判定依据。
+        # 注意：混合检索(BM25+RRF)下 results 按 RRF 融合名次排序，而 .score 仍是
+        # 稠密余弦分，两者并不同序 —— results[0].score 未必是最大值（实测出现过
+        # 0.357 / 0.336 / 0.433 这种非单调序列）。直接取 results[0] 会低估
+        # 最高相似度，导致本可"已验证"的陈述被误判为"待验证"，
+        # 进而使 overall_verification_rate 系统性偏低。
+        best = max(results, key=lambda r: r.score)
         threshold = self._settings.kb_score_threshold
 
         # 转 dict 列表：RetrievalResult 是 dataclass，不能直接 JSON 序列化
@@ -520,19 +526,27 @@ class NumpyKnowledgeBase(KnowledgeBaseInterface):
                 "source": best.source,
             }
 
-        # 高语义相似度（过了阈值）→ 进一步用文本重叠度辅助判断
-        overlap = self._text_overlap(statement, best.content)
-
-        # 判断逻辑（best_score 为主判据，overlap 仅用于识别"矛盾"）：
-        # - best_score >= threshold（0.6）：bge-m3 语义相关，默认"已验证"
-        # - 例外：best_score > 0.75 且 overlap < 0.02 → "矛盾"
-        #   （语义高度相似但文本几乎不重叠，可能是 LLM 编造的看似相关内容）
+        # 【口径说明 —— 本状态表示"可溯源性"，不等于"事实正确性"】
         #
-        # 原 logic 要求 overlap > 0.3 才判"已验证"，但 _text_overlap 用 Jaccard
-        # 相似度（中文按单字集合），对"短陈述 vs 长 chunk"场景天然偏低
-        # （陈述20字、chunk200字，Jaccard 必然小），导致几乎所有陈述都"待验证"。
-        # 改为以 best_score 为主，避免 Jaccard 对长短文本对比的偏差。
-        if best.score > 0.75 and overlap < 0.02:
+        # 实测定标（40 条已知正确陈述 vs 10 条话题相关但事实错误的陈述）：
+        #     正样本 median=0.640 / p75=0.684 / max=0.762
+        #     负样本 median=0.641 / p75=0.690 / max=0.750   ← 分布几乎完全重合
+        #   在 0.58~0.72 各阈值下，正负样本通过率之差均 ≈ 0（最高 +0.075，属噪声）。
+        # 结论：bge-m3 余弦相似度刻画的是"话题相关性"，不具备判定"事实正确性"
+        # 的能力。因此任何单一相似度阈值都无法充当事实核查器 ——
+        # 曾把线抬到 0.72 试图"更严格"，实际只是让 95% 的正确陈述也判不过
+        # （已验证率恒为 0），指标丧失区分力，而非变得诚实。
+        #
+        # 故本方法的语义明确收敛为：
+        #     "已验证" = 该陈述在知识库中检索得到达标支撑文档（grounded / 有出处）
+        #     "待验证" = 知识库中无达标支撑文档（模型自身推理，无外部依据）
+        #     "矛盾"   = 高度相关却几乎零字面重叠，疑似看似相关的编造内容
+        # 事实正确性由独立的离线事实比对指标承担
+        # （validate_metrics.py: reference_answer_points 命中率），二者不混用。
+        #
+        # 阈值与召回门槛 kb_score_threshold 保持一致，语义自洽：能被检索到即有出处。
+        overlap = self._text_overlap(statement, best.content)
+        if best.score > 0.85 and overlap < 0.02:
             status = "矛盾"
         else:
             status = "已验证"

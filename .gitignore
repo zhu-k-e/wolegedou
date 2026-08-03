@@ -54,3 +54,11 @@ new_sub.yaml
 diag_resp*.json
 verify_resp.json
 
+# 跨进程任务上下文快照（运行时生成，多 worker 共享，不入 Git）
+data/task_contexts/
+
+# 临时调试/一次性演示脚本（不入 Git）
+_verify_traceability_tmp.py
+e2e_demo.py
+e2e_q2_timing.py
+

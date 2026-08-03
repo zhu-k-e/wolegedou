@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     # --- 服务 ---
     host: str = "127.0.0.1"
     port: int = 8000
-    debug: bool = True
-    log_level: str = "DEBUG"
+    debug: bool = False
+    log_level: str = "INFO"
 
     # --- 贡献记忆 ---
     ema_smooth: float = 0.8
@@ -77,7 +77,10 @@ class Settings(BaseSettings):
     elimination_consecutive_count: int = 3
 
     # --- 超时 ---
-    llm_timeout: int = 60
+    # 必须 >= max_tokens / 模型输出速度下限。域Agent候选生成/聚焦用 max_tokens=4096，
+    # 按 30~60 token/s 需 68~136s；曾误设为 30s，导致长输出必然超时抛异常（整段丢失，
+    # 非截断），触发资源包整体降级。配合 llm_client 的 max_retries=1，最坏 120×2=240s。
+    llm_timeout: int = 120
     fsm_max_revisions: int = 2
 
     # --- CORS / 安全 ---
@@ -98,8 +101,16 @@ class Settings(BaseSettings):
 
     @property
     def db_full_path(self) -> Path:
-        """数据库文件的绝对路径"""
-        return Path(self.db_path).resolve()
+        """数据库文件的绝对路径
+
+        相对路径统一锚定到项目根（project_root），避免 server 从不同启动目录
+        （项目根 vs backend/）运行时落到两份不同的 DB，导致指标脚本读不到
+        实时 demo 数据。绝对路径行为不变。
+        """
+        p = Path(self.db_path)
+        if not p.is_absolute():
+            p = self.project_root / p
+        return p.resolve()
 
     @property
     def project_root(self) -> Path:

@@ -98,11 +98,35 @@ async def ask(request: AskRequest) -> AskResponse:
         from loguru import logger
         logger.warning(f"保存任务指标失败（不影响主流程）: {e}")
 
+    # 落库生成资源文本（事实比对指标 + 测试数据套装数据源，容错，不增加调用时间）
+    try:
+        from backend.db.resource_store import save_task_resources
+        save_task_resources(result.get("task_id"), request.session_id, result, request.question)
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"落库生成资源失败（不影响主流程）: {e}")
+
     # P1-6: 回写缓存（仅成功的完整响应才缓存，error 不缓存）
     if settings.demo_cache_enabled and not result.get("error"):
         cache_answer(request.question, result, result.get("profile"))
 
     return response
+
+
+@router.post("/tasks")
+async def create_task_endpoint(request: AskRequest) -> dict:
+    """异步任务提交 - 立即返回 task_id，后端后台执行
+
+    前端拿到 task_id 后轮询 GET /api/status/{task_id}（或连 WS /ws/{task_id}）获取进度与结果。
+    解决 /api/ask 同步阻塞 + cloudflared 免费版 100s 隧道超时导致的联调断连问题。
+    """
+    orchestrator = get_orchestrator()
+    task_id = orchestrator.submit_task(
+        question=request.question,
+        session_id=request.session_id,
+        history=request.history,
+    )
+    return {"task_id": task_id, "status": "PENDING"}
 
 
 def _record_assistant_reply(

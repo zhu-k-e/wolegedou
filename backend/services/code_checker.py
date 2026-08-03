@@ -211,3 +211,96 @@ def check_code_in_markdown(markdown: Optional[str]) -> Optional[str]:
     combined = "; ".join(issues)
     logger.warning(f"Markdown 代码块安全检查未通过: {combined}")
     return combined
+
+
+# ---------------------------------------------------------------------------
+# 交互式输入安全化（方案书§3.5.1 安全增强）
+#
+# 讲义/实操指南里的 Python 示例常出现 input()，学生直接复制运行会阻塞在
+# 等待键盘输入。此处仅对 ```python 代码块做静态替换：把 input(...) 调用
+# 替换为占位符字符串，并保留原调用作为注释，既不改变教学语义、也不新增
+# LLM 调用，彻底消除"照抄即卡死"的体验问题。
+# 其他危险调用（eval/exec/open 等）仍交由 check_code_in_markdown 告警，不在此中和。
+# ---------------------------------------------------------------------------
+
+def _sanitize_input_in_code(code: str) -> tuple[str, bool]:
+    """中和单段 Python 代码里的 input() 调用
+
+    Returns:
+        (new_code, changed)：替换后的代码与是否发生改动
+    """
+    changed = False
+    out: list[str] = []
+    i = 0
+    n = len(code)
+    needle = "input("
+    nl = len(needle)
+    while i < n:
+        # 仅在词边界处匹配 input(，避免误伤 myinput( 等标识符
+        if code.startswith(needle, i) and (i == 0 or not (code[i - 1].isalnum() or code[i - 1] == "_")):
+            # 定位匹配的 ')'
+            depth = 1  # 已经处于 input( 的外层括号内
+            k = i + nl - 1  # '(' 的位置
+            m = k + 1
+            while m < n and depth >= 0:
+                if code[m] == "(":
+                    depth += 1
+                elif code[m] == ")":
+                    depth -= 1
+                if depth == 0:
+                    break
+                m += 1
+            inner = code[k + 1:m]  # input( 与 ) 之间的内容
+            original_call = code[i:m + 1]  # 完整 input(...)
+            # 占位符 + 保留原调用注释，学生可一眼还原交互式写法
+            replacement = (
+                "'<交互输入占位符>'  "
+                f"# 安全提示：原为 {original_call}，直接运行会阻塞等待输入；"
+                "如需交互式，请自行改回 name = input(...)"
+            )
+            out.append(replacement)
+            changed = True
+            i = m + 1
+        else:
+            out.append(code[i])
+            i += 1
+    return "".join(out), changed
+
+
+def sanitize_dangerous_input_in_markdown(markdown: str) -> tuple[str, bool]:
+    """对 Markdown 中 ```python 代码块的 input() 调用做安全化
+
+    Args:
+        markdown: 讲义 content_markdown / 实操指南 steps_markdown 等正文
+
+    Returns:
+        (new_markdown, changed)：安全化后的正文与是否发生改动
+    """
+    if not markdown or not markdown.strip():
+        return markdown, False
+
+    blocks = list(_CODE_BLOCK_RE.finditer(markdown))
+    if not blocks:
+        return markdown, False
+
+    out: list[str] = []
+    last = 0
+    changed = False
+    for blk in blocks:
+        lang = blk.group(1)
+        code = blk.group(2)
+        start, end = blk.span()
+        out.append(markdown[last:start])
+        lang_norm = (lang or "").strip().lower()
+        if lang_norm in ("python", "py"):
+            new_code, c = _sanitize_input_in_code(code)
+            if c:
+                changed = True
+                out.append(f"```{lang}\n{new_code}\n```")
+            else:
+                out.append(markdown[start:end])
+        else:
+            out.append(markdown[start:end])
+        last = end
+    out.append(markdown[last:])
+    return "".join(out), changed

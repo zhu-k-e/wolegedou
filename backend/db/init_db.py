@@ -230,6 +230,26 @@ DDL_STATEMENTS = [
     )
     """,
 
+    # 14. 生成资源落库表（事实比对指标 + 测试数据套装数据源）
+    # 持久化每次任务最终生成的讲义/实操指南/测试题文本，供 validate_metrics.py
+    # 结合 tests/test_cases_100.json 真值做事实比对（覆盖率/适配率），以及导出
+    # "输入画像→最终生成资源"完整示例。仅在 /api/ask 返回层静默写入，不改生成逻辑、
+    # 不增加调用时间。
+    """
+    CREATE TABLE IF NOT EXISTS task_resources (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id              TEXT NOT NULL UNIQUE,  -- 与 task_metrics.task_id 对应
+        session_id           TEXT NOT NULL,
+        question             TEXT,                  -- 原始问题（便于与测试用例真值关联）
+        lecture              TEXT,                  -- 讲义 Markdown 全文
+        practice_guide       TEXT,                  -- 实操指南 Markdown 全文
+        quiz                 TEXT,                  -- 测试题 JSON 全文
+        knowledge_refs       TEXT,                  -- 溯源标注 JSON（权威来源）
+        created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES session(session_id)
+    )
+    """,
+
     # 索引
     "CREATE INDEX IF NOT EXISTS idx_perf_agent_tag ON agent_performance(agent_id, function_tag)",
     "CREATE INDEX IF NOT EXISTS idx_resource_stats_session ON task_resource_stats(session_id)",
