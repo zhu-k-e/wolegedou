@@ -73,6 +73,7 @@ async def ask(request: AskRequest) -> AskResponse:
         question=request.question,
         session_id=request.session_id,
         history=request.history,
+        profile=orchestrator._coerce_profile(request.profile),
     )
 
     response = AskResponse(**result)
@@ -125,6 +126,7 @@ async def create_task_endpoint(request: AskRequest) -> dict:
         question=request.question,
         session_id=request.session_id,
         history=request.history,
+        profile=request.profile,
     )
     return {"task_id": task_id, "status": "PENDING"}
 

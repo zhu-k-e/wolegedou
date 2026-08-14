@@ -225,6 +225,86 @@ class ProfileAgent(BaseAgent):
         )
         return profile
 
+    async def complete_profile(
+        self,
+        known: "_PartialProfile",
+        question: str,
+        session_id: str,
+        history: Optional[list[dict]] = None,
+    ) -> StudentProfile:
+        """基于用户已提交的合法字段补全缺口，生成完整 StudentProfile。
+
+        方案A：前端提交部分画像时调用。用户字段（known.fields / domain_hint /
+        test_results）原样保留、绝不覆盖；LLM 只补缺失字段。补全后落库，
+        保证 /api/report 可查到画像。
+        """
+        import json
+
+        known_str = ", ".join(f"{k}={v.value}" for k, v in known.fields.items()) or "（无）"
+        domain_hint_str = ", ".join(known.domain_hint) or "（无）"
+        test_results_str = (
+            json.dumps([t.model_dump() for t in known.test_results], ensure_ascii=False)
+            if known.test_results else "（无）"
+        )
+        history_str = json.dumps(history, ensure_ascii=False) if history else "无"
+
+        user_prompt = (
+            f"学生问题：{question}\n历史对话：{history_str}\n\n"
+            f"【用户已明确提供的学情字段，必须原样保留、严禁修改】\n"
+            f"  已知字段：{known_str}\n"
+            f"  domain_hint：{domain_hint_str}\n"
+            f"  test_results：{test_results_str}\n\n"
+            f"请只补充上述缺失的字段，输出完整的严格JSON学情画像。"
+            f"规则与生成画像一致（枚举值不可自创）。"
+        )
+
+        profile = await self.generate_and_validate(
+            user_prompt=user_prompt,
+            model_class=StudentProfile,
+            tier=ModelTier.MID,
+            temperature=0.0,
+        )
+
+        # 强制用用户已知字段覆盖（防止 LLM 擅改用户明确给定的值）
+        for fname, val in known.fields.items():
+            setattr(profile, fname, val)
+        if known.domain_hint:
+            merged = list(known.domain_hint)
+            for d in profile.domain_hint:
+                if d not in merged:
+                    merged.append(d)
+            profile.domain_hint = merged
+            profile.domain_confidence = {
+                **profile.domain_confidence,
+                **{d: ConfidenceLevel.HIGH for d in known.domain_hint},
+            }
+        if known.test_results:
+            profile.test_results = known.test_results
+
+        # 意图兜底：技术关键词问题强制 generation（与 generate_profile 一致）
+        self._enforce_generation_for_technical_questions(question, profile)
+
+        profile.session_id = session_id
+        profile.version = profile_repo.get_next_version(session_id)
+        profile_repo.save_profile(
+            session_id=session_id,
+            version=profile.version,
+            knowledge_level=profile.knowledge_level.value,
+            background=profile.background.value,
+            current_goal=profile.current_goal.value,
+            question_type=profile.question_type.value,
+            domain_hint=profile.domain_hint,
+            complexity_estimate=profile.complexity_estimate.value,
+            intent_type=profile.intent_type.value,
+            domain_confidence={k: v.value for k, v in profile.domain_confidence.items()},
+            test_results=[t.model_dump() for t in profile.test_results],
+        )
+        logger.info(
+            f"部分画像已补全: session={session_id}, 已知={list(known.fields.keys())}, "
+            f"补全后level={profile.knowledge_level}"
+        )
+        return profile
+
     @staticmethod
     def _adjust_knowledge_level_for_difficulty_feedback(
         profile: StudentProfile,

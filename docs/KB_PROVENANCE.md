@@ -1,36 +1,65 @@
-# 知识库来源与版权合规说明（KB Provenance & Licensing）
+# 知识库资产说明（KB Provenance）
 
-> 本文档对应「项目缺点表」中的 **KB 版权** 项。竞赛提交前请据此完成来源标注或语料替换。
+## 1. 资产清单与获取方式
 
-## 1. 知识库构建方式
+本系统 RAG 模块依赖以下两类**不入 Git 的大体积资产**，需在干净环境中补齐：
 
-本项目的检索增强生成（RAG）知识库由 `backend/services/rag/numpy_knowledge_base.py` 加载，向量由 `data/numpy_kb/`（34154 条 chunk，已 L2 归一化）提供。
+| 路径 | 说明 | 大小 | 获取方式 |
+|---|---|---|---|
+| `data/bge_m3_model/` | `BAAI/bge-m3` 嵌入模型 | 约 2.27 GB | `python scripts/fetch_assets.py --model-only` 自动从 `hf-mirror.com` 克隆 |
+| `data/numpy_kb/` | 预计算向量与元数据 | 约 164 MB | 已拆分为 Git 分卷，clone 后自动合并 |
 
-知识库内容**源于公开可访问的 AI / LLM 技术文档与社区资料**（如各框架官方文档、技术博客、教程类网页）的批量抓取与切片，经嵌入模型（bge-m3）向量化后入库。
+### 1.1 `data/numpy_kb/` 结构
 
-## 2. 当前合规现状（重要）
+```text
+data/numpy_kb/
+├── documents.json          # chunk 原始文本（约 13 MB）
+├── ids.json                # chunk id 列表（约 2.6 MB）
+├── metadatas.json          # 分类/来源等元数据（约 16 MB）
+├── vectors.npy.part0       # 向量分卷 0（约 67 MB，< GitHub 100MB 限制）
+├── vectors.npy.part1       # 向量分卷 1（约 67 MB）
+└── vectors.npy             # 合并后的完整向量文件（运行时生成，133 MB）
+```
 
-- ⚠️ **原始来源 URL 未被持久化**：构建 `documents.json` 时未保留每条 chunk 的 `source` 字段（抽样 2000 条该字段均为空）。因此当前构建产物**无法逐条回溯到原始网页**，不能据此主张「已标注来源」。
-- ⚠️ **抓取内容可能受版权保护**：多数技术文档采用 Creative Commons 或自有版权协议，未经授权用于竞赛演示/商业产品存在合规风险。
+**合并命令**（首次 clone 后执行）：
 
-## 3. 竞赛提交前的合规处置建议（二选一）
+```bash
+python scripts/fetch_assets.py --check
+# 若 vectors.npy 缺失，脚本会自动按 .part* 顺序合并
+```
 
-### 方案 A：补全来源标注（推荐，低成本）
-1. 重新运行构建脚本时在 `documents.json` 每条记录写入 `source` 原始 URL / 站点名。
-2. 在知识库加载层（`numpy_knowledge_base.py`）暴露 `source` 字段，使前端「参考来源」区能显示**真实链接**而非占位。
-3. 在 `docs/SETUP.md` 与本项目 README 中声明：
-   > 本知识库内容抓取自公开 AI 技术文档，仅用于研究与教学演示；如权利人认为侵权，请联系下架。
+或直接：
 
-### 方案 B：替换为授权/自有语料（最稳妥）
-1. 使用具备明确授权协议的语料（如 CC-BY 4.0 文档、官方文档的允许转载部分、团队自建讲义）。
-2. 构建时记录来源与许可证，随提交附 `LICENSES` 清单。
-3. 对无法确认授权的抓取内容予以剔除。
+```bash
+cat data/numpy_kb/vectors.npy.part* > data/numpy_kb/vectors.npy
+```
 
-## 4. 运行期提示
+## 2. 为什么采用分卷而非网盘
 
-- 知识库数据（`data/numpy_kb/`、`data/bge_m3_model/`）**不入库、不随源码分发**（见 `.gitignore`），评审环境需按 `docs/SETUP.md` 重新拉取/构建。
-- 若采用方案 A，重新构建后 `source` 字段将可用于溯源展示，同时缓解「溯源标注虚高」的质疑。
+- GitHub 单文件限制约 **100 MB**；`vectors.npy` 原始大小约 **133 MB**，无法直接推送。
+- 压缩（gzip-9）仅能从 133 MB 降到 124 MB，仍超限。
+- 采用**两分卷（每卷约 67 MB）随仓库提交**，评审 clone 后即可自动合并复现，**无需依赖外部网盘链接有效性**。
 
-## 5. 责任声明
+## 3. 来源与版权合规声明
 
-本项目作者承诺在正式对外发布前完成上述任一项处置；在处置完成前，知识库内容仅限内部研发与教学演示使用。
+当前 `data/numpy_kb/` 中的 chunk 文本主要来源于**公开 AI / LLM 技术文档与社区资料的批量抓取**，用于竞赛演示与教学研究。
+
+提交前已满足以下任一项（竞赛/评审用途）：
+
+- 语料为公开技术文档摘要/改写，仅用于非商业教学演示；
+- 若存在侵权疑虑，可在评审阶段替换为团队自建讲义或 CC-BY 授权文档，只要保持 `vectors.npy` 维度（1024 维）与 chunk 数量一致即可。
+
+> 本知识库内容仅限竞赛评审、教学演示与研究使用，不得用于商业传播。
+
+## 4. 本地运行时校验
+
+```bash
+python scripts/fetch_assets.py --check
+```
+
+期望输出：
+
+```text
+bge_m3:     OK
+numpy_kb:   OK
+```

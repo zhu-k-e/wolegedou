@@ -241,12 +241,21 @@ class JudgePanel:
             override_reason = None
         # 2:1 分歧
         elif pass_count == 2:
-            verdict_value, dissent_resolution = await self._resolve_dissent(
-                focused_output, profile, judges, question,
-                winning_candidate, losing_candidate,
-                losing_agent, winning_agent,
-            )
-            override_reason = None
+            # 阶段0 裁判降级放行：仅当"事实审查裁判"(judges[0])投fail时才走严谨分歧
+            # 解决/回炉；逻辑/适用性单一反对不足以推翻2票通过，直接低置信放行，
+            # 避免无用回炉把事实准确的好输出改坏。事实错误仍被严格卡住（护住谬误率）。
+            fail_idx = next(i for i, j in enumerate(judges) if j.judgment == "fail")
+            if fail_idx == 0:
+                verdict_value, dissent_resolution = await self._resolve_dissent(
+                    focused_output, profile, judges, question,
+                    winning_candidate, losing_candidate,
+                    losing_agent, winning_agent,
+                )
+                override_reason = None
+            else:
+                verdict_value = Verdict.LOW_CONFIDENCE_PASSED
+                dissent_resolution = None
+                override_reason = None
         # 0:3 全票失败 → 裁判长终审门控（方案书4.4.2延伸：0:3状态机未定义）
         elif fail_count == 3:
             verdict_value, override_reason = await self._final_review_on_unanimous_fail(
@@ -312,7 +321,14 @@ class JudgePanel:
         raw = await judge.generate(user_prompt, tier=ModelTier.HIGH, temperature=0.0)
         data = await judge.parse_json_safe(raw)
         if data is None:
-            data = {"verdict": "failed", "confidence": 0.3, "issues": []}
+            # 瞬时异常/空输出/截断导致解析失败：重试一次（仍用HIGH档），
+            # 避免误判 failed → 0:3 → 强制放行。重试仍失败则降级为 revise（转回炉修复），
+            # 而非直接 failed（revise 超限才会走正常强制流程，强制放行更可控）。
+            logger.warning(f"裁判{judge.agent_name}输出解析失败，重试一次")
+            raw = await judge.generate(user_prompt, tier=ModelTier.HIGH, temperature=0.0)
+            data = await judge.parse_json_safe(raw)
+        if data is None:
+            data = {"verdict": "revise", "confidence": 0.3, "issues": ["（裁判输出解析失败，已转回炉）"]}
 
         # 将 LLM 返回的 verdict 归一化为 pass / fail 二元判断
         raw_verdict = data.get("verdict", "failed")

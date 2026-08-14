@@ -13,11 +13,13 @@ data/*.db
 data/chroma_db/
 data/*.sqlite3
 
-# 知识库预计算向量数据（派生产物，从网盘获取，不入 Git）
-# vectors.npy 140MB 超过 GitHub 单文件 100MB 限制
-data/numpy_kb/
+# 知识库预计算向量数据
+# vectors.npy 原始文件 133MB 超过 GitHub 单文件 100MB 限制，
+# 故拆分为 vectors.npy.part* 分卷入仓（每卷 <100MB），clone 后由 fetch_assets.py 自动合并。
+data/numpy_kb/vectors.npy
 data/raw_docs/
 *.npy
+!data/numpy_kb/vectors.npy.part*
 
 # bge-m3 模型本地缓存（2.2GB，通过 git clone https://hf-mirror.com/BAAI/bge-m3 下载）
 # 不入 Git，各人本地下载
@@ -47,6 +49,9 @@ data/*.db-shm
 data/*.db-wal
 data/*.db.bak_*
 
+# 指标判定 LLM 缓存（派生产物，评审 clone 后自行重判，不入 Git）
+backend/data/metrics_llm_judge_cache*.json
+
 # 二进制穿透工具（cloudflared，本地下载，不入 Git）
 cloudflared.exe/
 
@@ -62,4 +67,31 @@ data/task_contexts/
 _verify_traceability_tmp.py
 e2e_demo.py
 e2e_q2_timing.py
+
+# 根目录一次性开发/诊断脚本（非交付物，不入 Git）
+_bm_backup_clear.py
+_cov_detail.py
+_coverage_diag.py
+_eval_reset.py
+_judge_audit.py
+_pilot_clear.py
+_selftest_p0.py
+
+# 后端临时探针脚本（非交付物，不入 Git）
+backend/scripts/_ping_qwenmax.py
+backend/scripts/_probe_qwenmax.py
+
+# 数据备份 / 状态快照（不入 Git）
+data/_st_health.json
+data/_st_r0.json
+data/bm_backup_*.json
+data/eval_backup_*.json
+data/wolegedou.db.backup.*
+
+# 过时开发计划文档（前端已完成，不入 Git）
+docs/test_results_feature_plan.md
+docs/test_results_frontend_contract.md
+
+# 生成的演示产物（不入 Git）
+outputs/
 

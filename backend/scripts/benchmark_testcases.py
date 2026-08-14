@@ -29,18 +29,91 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from loguru import logger
 
+# 日志级别开关：默认 INFO（不刷 DEBUG 检索噪音，仍能看到每条用例 ok/error 与汇总）；
+# 想看全部细节时： $env:BENCH_LOG_LEVEL="DEBUG"
+import os
+_BENCH_LOG_LEVEL = os.getenv("BENCH_LOG_LEVEL", "INFO").upper()
+logger.remove()
+logger.add(
+    sys.stderr,
+    level=_BENCH_LOG_LEVEL,
+    format="<level>{level: <8}</level> | {message}",
+)
+
 from backend.core.orchestrator import Orchestrator
 from backend.db.resource_store import save_task_resources, ensure_task_resources_table
 from backend.db.database import execute_sql, query_all
 from backend.services import compliance
 from backend.services.knowledge_base import get_knowledge_base
 from backend.services.rag.kb_manager import init_knowledge_base
+from backend.schemas.student_profile import (
+    StudentProfile, KnowledgeLevel, Background, CurrentGoal,
+    QuestionType, ComplexityEstimate, IntentType, ConfidenceLevel,
+)
 
 _TEST_PATH = _PROJECT_ROOT / "tests" / "test_cases_100.json"
 
 
 def _norm_q(q) -> str:
     return re.sub(r"\s+", "", (q or "").strip().lower())
+
+
+# test_cases_100 的 suitable_profile 词汇 -> StudentProfile 枚举映射
+_KL_MAP = {
+    "beginner": KnowledgeLevel.ENTRY,
+    "intermediate": KnowledgeLevel.INTERMEDIATE,
+    "advanced": KnowledgeLevel.ADVANCED,
+}
+_BG_MAP = {
+    "cs_student": Background.SCIENCE_NO_CODE,
+    "developer": Background.PYTHON,
+    "ml_student": Background.ML,
+    "liberal_arts": Background.LIBERAL_ARTS,
+}
+_GOAL_MAP = {
+    "learn_basics": CurrentGoal.QUICK_START,
+    "understand_principles": CurrentGoal.DEEP_UNDERSTANDING,
+    "project": CurrentGoal.PROJECT_DELIVERY,
+    "research": CurrentGoal.ALGORITHM_RESEARCH,
+}
+_QTYPE_MAP = {
+    "concept": QuestionType.CONCEPT,
+    "operation": QuestionType.OPERATION,
+    "debug": QuestionType.DEBUGGING,
+    "architecture": QuestionType.ARCHITECTURE,
+    "full_pipeline": QuestionType.FULL_PIPELINE,
+}
+
+
+def _build_profile(tc: dict) -> StudentProfile | None:
+    """从 test_cases 的 suitable_profile 构造 StudentProfile，供 process_question 注入。
+
+    使基准评测在"给定学情"下测量难度适配准确率（赛题 适配准确率 定义），
+    而非依赖系统自动诊断猜测难度（那样会污染适配率口径）。
+    """
+    sp = tc.get("suitable_profile")
+    if not sp:
+        return None
+    kl = _KL_MAP.get((sp.get("knowledge_level") or "").lower())
+    if kl is None:
+        return None
+    bg = _BG_MAP.get((sp.get("background") or "").lower(), Background.SCIENCE_NO_CODE)
+    goal = _GOAL_MAP.get((sp.get("current_goal") or "").lower(), CurrentGoal.QUICK_START)
+    qt = _QTYPE_MAP.get((tc.get("expected_question_type") or "").lower(), QuestionType.CONCEPT)
+    domains = tc.get("expected_domains") or []
+    return StudentProfile(
+        knowledge_level=kl,
+        background=bg,
+        current_goal=goal,
+        question_type=qt,
+        domain_hint=domains,
+        # 关键：注入画像时必须显式给出 domain_confidence，否则 matcher._resolve_domains
+        # 判定全 low → 退回 clarification，不生成讲义（适配率无法测量）。
+        domain_confidence={d: ConfidenceLevel.HIGH for d in domains},
+        complexity_estimate=ComplexityEstimate.SINGLE_DOMAIN,
+        intent_type=IntentType.GENERATION,
+        session_id=f"bm_{tc.get('id', '?')}",
+    )
 
 
 def _save_task_metrics(session_id: str, result: dict) -> None:
@@ -93,7 +166,10 @@ def _load_cases() -> list:
 
 def _done_set() -> set:
     try:
-        rows = query_all("SELECT question FROM task_resources WHERE question IS NOT NULL")
+        rows = query_all(
+            "SELECT question FROM task_resources "
+            "WHERE question IS NOT NULL AND session_id LIKE 'bm_%'"
+        )
         return {_norm_q(r["question"]) for r in rows}
     except Exception:
         return set()
@@ -108,7 +184,10 @@ async def run_one(orch: Orchestrator, tc: dict, done: set) -> dict:
     session_id = f"bm_{tc_id}"
     t0 = time.time()
     try:
-        result = await orch.process_question(question=q, session_id=session_id, history=[])
+        profile = _build_profile(tc)
+        result = await orch.process_question(
+            question=q, session_id=session_id, history=[], profile=profile, offline=True
+        )
     except Exception as e:
         return {"id": tc_id, "status": "error", "detail": str(e)[:200]}
 

@@ -16,6 +16,13 @@ class AskRequest(BaseModel):
     history: Optional[list[dict]] = Field(
         None, description="历史对话（同一session，首次为空）"
     )
+    profile: Optional[dict] = Field(
+        None,
+        description="可选学情画像（学历背景/理论测试结果等）。传入则跳过自动诊断、"
+                    "直接驱动生成；字段非法时自动降级为自动诊断，不影响主流程。"
+                    "完整字段见 StudentProfile（knowledge_level/background/current_goal/"
+                    "question_type/complexity_estimate/intent_type/domain_hint/test_results）。",
+    )
 
 
 class FeedbackRequest(BaseModel):

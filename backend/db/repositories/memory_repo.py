@@ -43,11 +43,11 @@ def save_contribution_memory(
 def get_recent_importance_scores(
     agent_id: str, function_tag: str, limit: int = 3
 ) -> list[float]:
-    """获取最近N次的importance_score（用于淘汰判定）"""
+    """获取最近N次的importance_score（用于淘汰判定）。排除离线评估记录。"""
     rows = query_all(
         """
         SELECT importance_score FROM contribution_memory
-        WHERE agent_id = ? AND function_tag = ?
+        WHERE agent_id = ? AND function_tag = ? AND task_type <> 'offline_eval'
         ORDER BY created_at DESC LIMIT ?
         """,
         (agent_id, function_tag, limit),

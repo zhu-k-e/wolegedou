@@ -28,19 +28,69 @@ from backend.agents.judge_panel import JudgePanel
 from backend.agents.matcher import Matcher, DispatchResult, Segment
 from backend.schemas.student_profile import (
     StudentProfile, IntentType, ComplexityEstimate, QuestionType,
+    KnowledgeLevel, Background, CurrentGoal,
+    ConfidenceLevel, TestResult, DOMAIN_HINT_ENUMS,
 )
-from backend.schemas.candidate_output import CandidateOutput
-from backend.schemas.review_feedback import ReviewFeedback
+from backend.schemas.candidate_output import CandidateOutput, FocusedOutputBody, SelfConfidence
+from backend.schemas.review_feedback import ReviewFeedback, CandidateReview, ReviewerScores
 from backend.schemas.focused_output import FocusedOutput
 from backend.schemas.judge_verdict import JudgeVerdict, Verdict, JudgeOpinion
 from backend.schemas.resource_package import ResourcePackage
 from backend.services.ws_manager import ws_manager
 from backend.services.memory_service import get_memory_service
 from backend.config import get_settings
+from backend.db.repositories import profile_repo
 
 
 # 聚焦输出单段零降级重试上限（指数退避：1s, 2s）。仅失败时发生，正常 0 成本。
 FOCUS_MAX_RETRIES = 3
+
+
+class _PartialProfile:
+    """用户提供的可能不完整的合法画像字段，待补全。
+
+    与 StudentProfile 的区别：StudentProfile 6 个核心字段必填，无法表达"部分提交"；
+    这里只收集用户提交且【合法】的字段，缺口由 _do_profiling 用 ProfileAgent 补全。
+    """
+
+    __slots__ = ("fields", "domain_hint", "test_results")
+
+    def __init__(self):
+        self.fields: dict = {}          # {字段名: 枚举值}
+        self.domain_hint: list = []
+        self.test_results: list = []
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.fields and not self.domain_hint and not self.test_results
+
+
+# intent_type 中文别名 → 英文枚举值（队友前端用中文展示也兼容）
+_INTENT_ALIAS = {
+    "内容生成": "generation", "生成": "generation", "generation": "generation",
+    "路径导航": "navigation", "导航": "navigation", "navigation": "navigation",
+    "问题澄清": "clarification", "澄清": "clarification", "clarification": "clarification",
+}
+
+
+def _build_profile_from_partial(pp: "_PartialProfile", session_id: str) -> StudentProfile:
+    """补全失败兜底：用户字段优先，缺口用中性默认填，保证请求永不因画像问题失败。
+
+    用于 ProfileAgent.complete_profile（MID 档 LLM）不可用时的降级——用户已提交的
+    合法字段仍原样生效，只是缺失字段由系统给一个保守默认值。
+    """
+    known = pp.fields
+    return StudentProfile(
+        knowledge_level=known.get("knowledge_level", KnowledgeLevel.ENTRY),
+        background=known.get("background", Background.SCIENCE_NO_CODE),
+        current_goal=known.get("current_goal", CurrentGoal.QUICK_START),
+        question_type=known.get("question_type", QuestionType.CONCEPT),
+        domain_hint=pp.domain_hint,
+        complexity_estimate=known.get("complexity_estimate", ComplexityEstimate.SINGLE_DOMAIN),
+        intent_type=known.get("intent_type", IntentType.GENERATION),
+        test_results=pp.test_results,
+        session_id=session_id,
+    )
 
 
 @dataclass
@@ -53,6 +103,8 @@ class TaskContext:
 
     # 各阶段产物
     profile: Optional[StudentProfile] = None
+    # 方案A：用户提交的（可能不完整的）画像，_do_profiling 用 ProfileAgent 补全缺口
+    partial_profile: Optional["_PartialProfile"] = None
     dispatch_result: Optional[DispatchResult] = None
     candidate_outputs: list[list[CandidateOutput]] = field(default_factory=list)  # 每段的候选输出
     review_feedbacks: list[ReviewFeedback] = field(default_factory=list)
@@ -76,6 +128,9 @@ class TaskContext:
 
     # P1-1: 双低触发的段索引（self_confidence都<0.5但知识库不可用时标记）
     low_confidence_segments: set = field(default_factory=set)
+
+    # P1-2: 离线评估标记（benchmark用），不参与agent_performance/α/淘汰
+    offline: bool = False
 
 
 class Orchestrator:
@@ -104,8 +159,17 @@ class Orchestrator:
         question: str,
         session_id: str,
         history: Optional[list[dict]] = None,
+        profile: Optional["StudentProfile"] = None,
+        offline: bool = False,
     ) -> dict:
         """处理学生问题 - 主FSM入口
+
+        Args:
+            profile: 可选学情画像。若提供则跳过 PROFILING 阶段的自动诊断，
+                     直接以该画像驱动后续生成（基准评测按 test_cases 的 suitable_profile
+                     注入，用于测量"给定学情下的难度适配准确率"）。不传则自动诊断。
+            offline: 是否为离线评估任务。离线任务只记录contribution_memory（task_type=offline_eval），
+                     不更新agent_performance/不触发α调整/不参与淘汰判定。避免benchmark污染自进化。
 
         Returns:
             包含resource_package和FSM轨迹的字典
@@ -116,7 +180,15 @@ class Orchestrator:
             session_id=session_id,
             question=question,
             history=history or [],
+            offline=offline,
         )
+        # 注入外部画像（基准评测/前端提交用）：完整画像直接复用；
+        # 部分画像（用户只填了部分字段）存入 partial_profile，_do_profiling 补全缺口
+        coerced = self._coerce_profile(profile)
+        if isinstance(coerced, StudentProfile):
+            ctx.profile = coerced
+        elif isinstance(coerced, _PartialProfile):
+            ctx.partial_profile = coerced
 
         logger.info(f"任务开始: task_id={task_id}, question='{question[:50]}...'")
 
@@ -174,8 +246,105 @@ class Orchestrator:
             "clarification_options": ctx.dispatch_result.clarification_options if ctx.dispatch_result else None,
         }
 
-    def create_task(self, question: str, session_id: str, history: Optional[list[dict]] = None) -> str:
-        """创建任务并返回 task_id（不立即执行，供异步提交使用）"""
+    @staticmethod
+    def _coerce_profile(profile):
+        """把可选学情画像（dict 或 StudentProfile）安全转成 StudentProfile / _PartialProfile / None。
+
+        返回语义：
+        - 完整合法 dict / StudentProfile           → StudentProfile（直接复用，跳过补全）
+        - 部分合法 dict（≥1 个有效字段）           → _PartialProfile（_do_profiling 用 ProfileAgent 补全缺口）
+        - 空 dict / 全字段非法 / 非 dict 非Profile → None（走自动诊断）
+
+        逐字段容错：认得的字段保留，错值/缺值该字段单独忽略，永不因画像问题失败。
+        """
+        if profile is None:
+            return None
+        if isinstance(profile, StudentProfile):
+            return profile
+        if not isinstance(profile, dict):
+            logger.warning("学情画像类型不支持（需 dict 或 StudentProfile），忽略并走自动诊断")
+            return None
+
+        pp = _PartialProfile()
+        _ENUM_FIELDS = {
+            "knowledge_level": KnowledgeLevel,
+            "background": Background,
+            "current_goal": CurrentGoal,
+            "question_type": QuestionType,
+            "complexity_estimate": ComplexityEstimate,
+            "intent_type": IntentType,
+        }
+        for fname, enum_cls in _ENUM_FIELDS.items():
+            val = profile.get(fname)
+            if val is None:
+                continue
+            # intent_type 兼容中文别名（内容生成/路径导航/问题澄清）
+            if fname == "intent_type" and isinstance(val, str) and val not in (
+                "generation", "navigation", "clarification",
+            ):
+                val = _INTENT_ALIAS.get(val, val)
+            try:
+                pp.fields[fname] = enum_cls(val)
+            except Exception:
+                logger.warning(f"学情画像字段'{fname}'值非法已忽略: {val!r}")
+
+        # 可选：domain_hint（list 或逗号分隔字符串，按 DOMAIN_HINT_ENUMS 过滤）
+        dh = profile.get("domain_hint")
+        if isinstance(dh, list):
+            for d in dh:
+                if d in DOMAIN_HINT_ENUMS:
+                    pp.domain_hint.append(d)
+                else:
+                    logger.warning(f"domain_hint 值非法已忽略: {d!r}")
+        elif isinstance(dh, str):
+            for d in [x.strip() for x in dh.split(",") if x.strip()]:
+                if d in DOMAIN_HINT_ENUMS:
+                    pp.domain_hint.append(d)
+                else:
+                    logger.warning(f"domain_hint 值非法已忽略: {d!r}")
+
+        # 可选：test_results（理论测试成绩，赛题要求整合）
+        tr = profile.get("test_results")
+        if isinstance(tr, list):
+            for t in tr:
+                if isinstance(t, dict):
+                    try:
+                        pp.test_results.append(TestResult(**t))
+                    except Exception:
+                        logger.warning(f"test_results 项非法已忽略: {t!r}")
+
+        if pp.is_empty:
+            return None
+        # 6 个核心字段全部齐备 → 直接构造完整 StudentProfile，跳过补全（省一次 LLM 调用）
+        _CORE_FIELDS = {
+            "knowledge_level", "background", "current_goal",
+            "question_type", "complexity_estimate", "intent_type",
+        }
+        if _CORE_FIELDS.issubset(pp.fields.keys()):
+            return StudentProfile(
+                knowledge_level=pp.fields["knowledge_level"],
+                background=pp.fields["background"],
+                current_goal=pp.fields["current_goal"],
+                question_type=pp.fields["question_type"],
+                domain_hint=pp.domain_hint,
+                complexity_estimate=pp.fields["complexity_estimate"],
+                intent_type=pp.fields["intent_type"],
+                test_results=pp.test_results,
+            )
+        return pp
+
+    def create_task(
+        self,
+        question: str,
+        session_id: str,
+        history: Optional[list[dict]] = None,
+        profile=None,
+    ) -> str:
+        """创建任务并返回 task_id（不立即执行，供异步提交使用）
+
+        profile: 可选学情画像（dict 或 StudentProfile）。注入后 _do_profiling 会
+        检测到 ctx.profile 非空并跳过自动诊断，直接以该画像驱动生成。
+        """
         task_id = f"task_{uuid.uuid4().hex[:12]}"
         ctx = TaskContext(
             task_id=task_id,
@@ -183,6 +352,11 @@ class Orchestrator:
             question=question,
             history=history or [],
         )
+        coerced = self._coerce_profile(profile)
+        if isinstance(coerced, StudentProfile):
+            ctx.profile = coerced
+        elif isinstance(coerced, _PartialProfile):
+            ctx.partial_profile = coerced
         self._task_contexts[task_id] = ctx
         # 初始状态 PENDING：避免后台任务首次 push 前轮询读到 UNKNOWN
         try:
@@ -229,9 +403,18 @@ class Orchestrator:
                 "state": "ERROR",
             }
 
-    def submit_task(self, question: str, session_id: str, history: Optional[list[dict]] = None) -> str:
-        """提交异步任务：创建 task 并后台启动，立即返回 task_id"""
-        task_id = self.create_task(question, session_id, history)
+    def submit_task(
+        self,
+        question: str,
+        session_id: str,
+        history: Optional[list[dict]] = None,
+        profile=None,
+    ) -> str:
+        """提交异步任务：创建 task 并后台启动，立即返回 task_id
+
+        profile: 透传给 create_task，用于注入学情画像（详见 create_task）。
+        """
+        task_id = self.create_task(question, session_id, history, profile)
         task = asyncio.create_task(self._run_task_background(task_id))
         # 保存引用，防止 Task 对象被 GC 回收导致后台任务静默取消
         self._background_tasks.add(task)
@@ -287,10 +470,21 @@ class Orchestrator:
                 ctx.fmt_task = asyncio.create_task(self._do_formatting(ctx))
                 try:
                     verdict = await self._do_judging(ctx)
-                except Exception:
-                    # 裁判失败：取消并发的资源生成任务，避免孤儿任务 + 浪费 LLM 调用
-                    ctx.fmt_task.cancel()
-                    raise
+                except Exception as e:
+                    # 裁判团异常（极少）：不取消并发资源生成，降级为低置信度强制通过，
+                    # 保证任务不以致 error 失败、学生至少拿到答案（对应新需求：任何问题都必须能回答）。
+                    logger.error(f"裁判团异常，降级为低置信度强制通过: {e}")
+                    # 修复：构造低置信度强制通过的裁决对象（而非 None），确保下游
+                    # _save_task_metrics / _write_contribution_memory 有合法 verdict 可读，
+                    # 真实记录本次降级（而非静默丢失代理指标或触发 AttributeError）。
+                    ctx.judge_verdict = JudgeVerdict(
+                        verdict=Verdict.LOW_CONFIDENCE_PASSED,
+                        judges=[JudgeOpinion(role="系统降级", judgment="fail", confidence=0.0)],
+                        overall_verification_rate=0.0,
+                        override_reason="judge_panel_exception_force_pass",
+                    )
+                    await self._transition(ctx, FSMState.FORMATTING)
+                    continue
                 if verdict.verdict in (Verdict.PASSED, Verdict.LOW_CONFIDENCE_PASSED):
                     await self._transition(ctx, FSMState.FORMATTING)
                 elif verdict.verdict == Verdict.REVISE and ctx.revision_count < self._settings.fsm_max_revisions:
@@ -314,9 +508,14 @@ class Orchestrator:
                 await self._transition(ctx, FSMState.JUDGING)
 
             elif ctx.current_state == FSMState.FORMATTING:
-                # 等待与裁判并发启动的资源生成完成；零降级：失败则向上抛，由任务以 error 显式失败
+                # 等待与裁判并发启动的资源生成完成。
+                # 零降级：即使资源包生成最终仍异常（_do_formatting 内部已兜一层），
+                # 也不向上抛 error 导致任务失败——聚焦输出(答案)已就绪，学生至少拿到答案。
                 if ctx.fmt_task is not None:
-                    await ctx.fmt_task
+                    try:
+                        await ctx.fmt_task
+                    except Exception as e:
+                        logger.error(f"资源生成任务异常(已降级，任务继续完成): {e}")
                     ctx.fmt_task = None
                 await self._transition(ctx, FSMState.COMPLETE)
 
@@ -331,11 +530,73 @@ class Orchestrator:
     # 各状态处理
     # ============================================================
 
+    def _persist_profile(self, profile: "StudentProfile") -> None:
+        """落库学情画像（含 test_results）。
+
+        用于外部注入画像 / 补全兜底的持久化补齐——自动诊断(generate_profile)与
+        部分补全(complete_profile)内部已各自 save，这里只在它们覆盖不到的
+        分支（完整画像注入、兜底）补存，保证 test_results 可经 /api/report 读回。
+        """
+        try:
+            profile_repo.save_profile(
+                session_id=profile.session_id,
+                version=profile_repo.get_next_version(profile.session_id),
+                knowledge_level=profile.knowledge_level.value,
+                background=profile.background.value,
+                current_goal=profile.current_goal.value,
+                question_type=profile.question_type.value,
+                domain_hint=profile.domain_hint,
+                complexity_estimate=profile.complexity_estimate.value,
+                intent_type=profile.intent_type.value,
+                domain_confidence={k: v.value for k, v in profile.domain_confidence.items()},
+                test_results=[t.model_dump() for t in profile.test_results],
+            )
+        except Exception as e:
+            logger.warning(f"学情画像落库失败（不影响主流程）: {e}")
+
     async def _do_profiling(self, ctx: TaskContext):
         """PROFILING: 学情画像生成
 
         降级策略（方案书§8.5.3）：LLM调用失败时使用默认画像，不中断主流程。
+        若 process_question 已注入外部画像（ctx.profile 非空），则跳过自动诊断，
+        直接复用注入画像（基准评测按 test_cases 的 suitable_profile 注入）。
         """
+        # 已注入完整画像：跳过诊断，直接进入 DISPATCHING
+        if ctx.profile is not None:
+            # 仅当用户提交了理论测试成绩时补齐落库（benchmark 注入的 suitable_profile 无 test_results，行为不变）
+            if ctx.profile.test_results:
+                self._persist_profile(ctx.profile)
+            await ws_manager.push_state(
+                ctx.task_id, FSMState.PROFILING.value,
+                {"profile": ctx.profile.model_dump(), "injected": True},
+            )
+            return
+
+        # 已注入部分画像（用户只填了部分字段）：补全缺口后复用，用户字段优先不覆盖
+        if ctx.partial_profile is not None:
+            await ws_manager.push_state(
+                ctx.task_id, FSMState.PROFILING.value,
+                {"partial": True, "known_fields": list(ctx.partial_profile.fields.keys())},
+            )
+            try:
+                ctx.profile = await self.profile_agent.complete_profile(
+                    known=ctx.partial_profile,
+                    question=ctx.question,
+                    session_id=ctx.session_id,
+                    history=ctx.history,
+                )
+            except Exception as e:
+                logger.warning(f"部分画像补全失败，用已知字段+默认兜底: {e}")
+                ctx.profile = _build_profile_from_partial(ctx.partial_profile, ctx.session_id)
+                # 兜底分支也确保理论测试成绩落库（如 MID 档不可用）
+                if ctx.profile.test_results:
+                    self._persist_profile(ctx.profile)
+            await ws_manager.push_state(
+                ctx.task_id, FSMState.PROFILING.value,
+                {"profile": ctx.profile.model_dump(), "completed_from_partial": True},
+            )
+            return
+
         await ws_manager.push_state(ctx.task_id, FSMState.PROFILING.value)
         try:
             ctx.profile = await self.profile_agent.generate_profile(
@@ -408,11 +669,27 @@ class Orchestrator:
                 segment_tasks.append((seg.seg_id, agent, candidate_info, task))
 
         # 全部并行
-        results = await asyncio.gather(*[t[3] for t in segment_tasks])
+        # 安全网：单个候选生成/校验失败(如 LLM 输出无法解析为合法 CandidateOutput，
+        # 触发 SchemaValidationError)不再整体抛错，降级为空但合法的候选输出
+        # (置信度0)，评审阶段自然会让另一正常候选胜出；两段都失败也能继续走完流程，
+        # 保证任何问题都至少产出答案、不会以致 error 失败（对应新需求：任何问题都必须能回答）。
+        results = await asyncio.gather(*[t[3] for t in segment_tasks], return_exceptions=True)
 
         # 按段组织结果
         seg_map: dict[str, list[CandidateOutput]] = {}
         for (seg_id, agent, info, _), output in zip(segment_tasks, results):
+            if isinstance(output, Exception):
+                logger.error(
+                    f"候选生成失败, 降级为空候选输出(agent={agent.agent_id}, seg={seg_id}): {output}"
+                )
+                output = CandidateOutput(
+                    agent_id=agent.agent_id,
+                    seg_id=seg_id,
+                    answer=FocusedOutputBody(),
+                    self_confidence=SelfConfidence(
+                        score=0.0, weak_points=["生成/校验失败,已降级"]
+                    ),
+                )
             seg_map.setdefault(seg_id, []).append(output)
 
         ctx.candidate_outputs = [seg_map[seg.seg_id] for seg_id in [s.seg_id for s in segments]]
@@ -481,9 +758,18 @@ class Orchestrator:
                     f"RAG增强: seg={seg.seg_id}, "
                     f"补充检索结果后重新生成{len(regen_tasks)}个候选"
                 )
-                regen_results = await asyncio.gather(*[t[1] for t in regen_tasks])
-                # 用重新生成的结果替换原结果
-                regen_map = {t[0].agent_id: r for t, r in zip(regen_tasks, regen_results)}
+                regen_results = await asyncio.gather(
+                    *[t[1] for t in regen_tasks], return_exceptions=True
+                )
+                # 用重新生成的结果替换原结果（仅替换成功的；失败的保留原候选，不 abort）
+                regen_map = {}
+                for t, r in zip(regen_tasks, regen_results):
+                    if not isinstance(r, Exception):
+                        regen_map[t[0].agent_id] = r
+                    else:
+                        logger.warning(
+                            f"RAG增强重新生成失败, 保留原候选(agent={t[0].agent_id}): {r}"
+                        )
                 ctx.candidate_outputs[i] = [
                     regen_map.get(co.agent_id, co) for co in seg_outputs
                 ]
@@ -512,7 +798,38 @@ class Orchestrator:
             )
             for i in range(len(ctx.candidate_outputs))
         ]
-        ctx.review_feedbacks = await asyncio.gather(*review_tasks)
+        ctx.review_feedbacks = await asyncio.gather(*review_tasks, return_exceptions=True)
+        # 安全网：某段审核失败(如评审 LLM 输出无法解析为合法 ReviewFeedback) →
+        # 用候选列表拼最小审核反馈，标记最高 self_confidence 的候选为胜出，
+        # 保证流程不 abort（对应新需求：任何问题都必须能回答，不能报错）。
+        if any(isinstance(rf, Exception) for rf in ctx.review_feedbacks):
+            patched = []
+            for i, rf in enumerate(ctx.review_feedbacks):
+                if not isinstance(rf, Exception):
+                    patched.append(rf)
+                    continue
+                logger.error(f"段{i}审核失败，降级为最小审核反馈: {rf}")
+                seg = ctx.dispatch_result.segments[i]
+                cands = ctx.candidate_outputs[i]
+                winner_agent_id = max(
+                    cands,
+                    key=lambda c: (c.self_confidence.score if c.self_confidence else 0.0),
+                ).agent_id
+                patched.append(ReviewFeedback(
+                    seg_id=seg.seg_id,
+                    candidates=[
+                        CandidateReview(
+                            agent_id=c.agent_id,
+                            scores=ReviewerScores(
+                                fact_accuracy=0.5, logic_completeness=0.5, pedagogical_fit=0.5
+                            ),
+                            issues_found=[],
+                            is_winner=(c.agent_id == winner_agent_id),
+                        )
+                        for c in cands
+                    ],
+                ))
+            ctx.review_feedbacks = patched
 
         # 跨段一致性审查（多段场景）
         if len(ctx.review_feedbacks) > 1:
@@ -544,13 +861,28 @@ class Orchestrator:
         ctx.losing_candidates = []
 
         # 跨段并行聚焦（每段独立，无数据依赖）
+        # 安全网：某段聚焦重试耗尽仍失败时，用候选输出就地拼最小聚焦输出，
+        # 避免整条任务因单段失败而 abort（对应新需求：任何问题都必须能回答，不能报错）。
         tasks = [
             self._focus_segment(ctx, i, review)
             for i, review in enumerate(ctx.review_feedbacks)
         ]
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for focused, winning_agent, winner_output, loser_output in results:
+        for i, res in enumerate(results):
+            if isinstance(res, Exception):
+                logger.error(f"段{i}聚焦重试耗尽，降级为候选输出组装最小聚焦输出: {res}")
+                review = ctx.review_feedbacks[i]
+                winner_candidate = next(c for c in review.candidates if c.is_winner)
+                winner_output = next(
+                    co for co in ctx.candidate_outputs[i]
+                    if co.agent_id == winner_candidate.agent_id
+                )
+                focused = self._build_fallback_focused(winner_output)
+                winning_agent = DomainAgent(winner_candidate.agent_id)
+                loser_output = None
+            else:
+                focused, winning_agent, winner_output, loser_output = res
             ctx.focused_outputs.append(focused)
             ctx.winning_agents.append(winning_agent)
             ctx.winning_candidates.append(winner_output)
@@ -616,6 +948,25 @@ class Orchestrator:
                     await asyncio.sleep(delay)
         logger.error(f"段{review.seg_id}聚焦输出重试耗尽, 任务将失败: {last_exc}")
         raise last_exc
+
+    def _build_fallback_focused(self, winner_output) -> FocusedOutput:
+        """聚焦输出失败时的就地兜底：用候选输出拼最小聚焦输出（保证任务不 abort）
+
+        候选输出 answer 已含 conclusion/reasoning_steps/knowledge_refs 等字段，
+        但可能 reasoning_steps<3 或缺 conclusion，逐项补默认值以满足 FocusedOutput 校验。
+        """
+        ans = winner_output.answer
+        reasoning = list(ans.reasoning_steps or [])
+        while len(reasoning) < 3:
+            reasoning.append("（聚焦生成失败，已降级展示候选输出要点）")
+        return FocusedOutput(
+            conclusion=ans.conclusion or "（聚焦生成失败，以下为候选输出内容）",
+            reasoning_steps=reasoning,
+            knowledge_refs=list(ans.knowledge_refs or []),
+            applicable_conditions=ans.applicable_conditions or "（未提供适用条件）",
+            code_example=ans.code_example,
+            difficulty_note=ans.difficulty_note or "（聚焦降级，未做个性化难度适配）",
+        )
 
     async def _do_judging(self, ctx: TaskContext) -> JudgeVerdict:
         """JUDGING: 裁判团3人并行审查 + 分歧解决 + 候选辩论
@@ -719,16 +1070,28 @@ class Orchestrator:
                 )
             judge_feedback = "\n".join(feedback_parts) if feedback_parts else None
 
-        # 重新聚焦输出，传入裁判具体反馈
-        for i, agent in enumerate(ctx.winning_agents):
-            focused = await agent.generate_focused_output(
-                question=ctx.question,
-                profile=ctx.profile,
-                original_output=ctx.winning_candidates[i],
-                review_feedback=ctx.review_feedbacks[i] if i < len(ctx.review_feedbacks) else None,
-                judge_feedback=judge_feedback,
-            )
-            ctx.focused_outputs[i] = focused
+        # 重新聚焦输出，传入裁判具体反馈（各段并发，避免串行累加耗时）
+        async def _revise_one(i: int, agent):
+            try:
+                focused = await agent.generate_focused_output(
+                    question=ctx.question,
+                    profile=ctx.profile,
+                    original_output=ctx.winning_candidates[i],
+                    review_feedback=ctx.review_feedbacks[i] if i < len(ctx.review_feedbacks) else None,
+                    judge_feedback=judge_feedback,
+                )
+                return i, focused
+            except Exception as e:
+                # 回炉失败：保留原聚焦输出，避免整条任务 abort（对应新需求：任何问题都必须能回答）
+                logger.error(f"段{i}回炉聚焦失败，保留原聚焦输出: {e}")
+                return i, None
+
+        revise_results = await asyncio.gather(
+            *[_revise_one(i, agent) for i, agent in enumerate(ctx.winning_agents)]
+        )
+        for i, focused in revise_results:
+            if focused is not None:
+                ctx.focused_outputs[i] = focused
 
         # P0-1: 重新合并多段聚焦输出
         if len(ctx.focused_outputs) == 1:
@@ -752,14 +1115,25 @@ class Orchestrator:
         if not focused:
             raise OrchestratorError("无聚焦输出可供资源生成")
 
-        # 零降级：generate_resource_package 内部已对三件套做重试，耗尽才抛错；
-        # 此处不再捕获降级，直接向上传播（最终在 process_question / _run_task_background 的
-        # except 中标记为 ERROR 任务，前端可感知并重跑）。
-        ctx.resource_package = await self.resource_agent.generate_resource_package(
-            task_id=ctx.task_id,
-            focused_output=focused,
-            profile=ctx.profile,
-        )
+        # 安全网：generate_resource_package 内部已对三件套做逐件降级，极端情况下仍可能抛错。
+        # 此处再兜一层：若整体异常，用聚焦输出就地组装最小资源包（仅讲义），
+        # 保证任务不以致 error 失败、学生至少拿到答案（对应新需求：任何问题都必须能回答，不能报错）。
+        try:
+            ctx.resource_package = await self.resource_agent.generate_resource_package(
+                task_id=ctx.task_id,
+                focused_output=focused,
+                profile=ctx.profile,
+            )
+        except Exception as e:
+            logger.error(f"资源包生成异常，降级为聚焦输出组装最小资源包: {e}")
+            ctx.resource_package = ResourcePackage(
+                task_id=ctx.task_id,
+                lecture=self.resource_agent.build_fallback_lecture(focused),
+                practice_guide=None,
+                quiz=None,
+                focused_output_ref=ctx.task_id,
+                profile_ref=(ctx.profile.session_id if ctx.profile else "") or "",
+            )
 
         await ws_manager.push_state(
             ctx.task_id, FSMState.FORMATTING.value,
@@ -815,12 +1189,13 @@ class Orchestrator:
                         task_id=ctx.task_id,
                         agent_id=candidate.agent_id,
                         function_tag=function_tag,
-                        task_type=ctx.profile.complexity_estimate.value,
+                        task_type="offline_eval" if ctx.offline else ctx.profile.complexity_estimate.value,
                         segment=review.seg_id,
                         review_score=review_score,
                         referee_verdict=ctx.judge_verdict.verdict.value,
                         referee_modifications=ctx.revision_count,
                         rework_type="major" if ctx.revision_count > 0 else "none",
+                        offline=ctx.offline,
                     )
 
     # ============================================================

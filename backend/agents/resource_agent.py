@@ -124,12 +124,33 @@ class ResourceAgent(BaseAgent):
         # 操作指引（决策清单/评估步骤/应用检查表），故放宽为始终生成，由prompt自适应。
         # 第3步测试题：原触发类型为{概念理解,操作步骤,架构设计}，但调试排错和全链路
         # 规划同样需要测试题（找错题/综合分析题），故放宽为始终生成。
-        # 三件套并行生成，任一失败向上抛 → 任务以 error 显式失败、可重跑（零降级）
+        # 最小降级原则（方案书§8.5.3）：三件套并行生成，任一失败仅降级该件，
+        # 不整体抛错（整体抛错会导致任务以 error 显式失败、学生看不到任何答案）。
+        # 与上方注释一致：return_exceptions=True + 逐件兜底，保证资源包始终可返回。
         lecture, practice_guide, quiz = await asyncio.gather(
             self._gen_with_retries(lambda a: self._generate_lecture(focused_output, profile, a)),
             self._gen_with_retries(lambda a: self._generate_practice_guide(focused_output, profile, a)),
             self._gen_with_retries(lambda a: self._generate_quiz(focused_output, profile, a)),
+            return_exceptions=True,
         )
+        if isinstance(lecture, Exception):
+            logger.warning(
+                f"讲义生成最终失败，降级为聚焦输出组装讲义: "
+                f"{type(lecture).__name__}: {lecture}"
+            )
+            lecture = self.build_fallback_lecture(focused_output)
+        if isinstance(practice_guide, Exception):
+            logger.warning(
+                f"实操指南生成最终失败，降级为 None: "
+                f"{type(practice_guide).__name__}: {practice_guide}"
+            )
+            practice_guide = None
+        if isinstance(quiz, Exception):
+            logger.warning(
+                f"测试题生成最终失败，降级为 None: "
+                f"{type(quiz).__name__}: {quiz}"
+            )
+            quiz = None
 
         # 安全化：先就地中和讲义/指南代码块中的交互式 input() 调用，
         # 避免学生照抄直接运行后阻塞在等待键盘输入（方案书§3.5.1 安全增强）。
@@ -140,11 +161,12 @@ class ResourceAgent(BaseAgent):
         if _lec_sanitized:
             logger.info(f"讲义代码块已安全化 input() 调用: task={task_id}")
 
-        practice_guide.steps_markdown, _prac_sanitized = sanitize_dangerous_input_in_markdown(
-            practice_guide.steps_markdown
-        ) if practice_guide is not None else (None, False)
-        if _prac_sanitized:
-            logger.info(f"实操指南代码块已安全化 input() 调用: task={task_id}")
+        if practice_guide is not None:
+            practice_guide.steps_markdown, _prac_sanitized = sanitize_dangerous_input_in_markdown(
+                practice_guide.steps_markdown
+            )
+            if _prac_sanitized:
+                logger.info(f"实操指南代码块已安全化 input() 调用: task={task_id}")
 
         # 讲义代码块安全检查（方案书§3.5.1）
         lecture_warning = check_code_in_markdown(lecture.content_markdown)
@@ -317,6 +339,17 @@ class ResourceAgent(BaseAgent):
             f"  · 有编程基础：可展示代码，但需解释关键步骤\n"
             f"- 按目标适配侧重：\n"
             f"  · 目标为'项目落地'：增加落地难点、选型建议、实施路线图\n\n"
+            f"【全面性要求（重要）】讲义必须系统性覆盖该主题的【全部核心概念与关键子主题】，"
+            f"不得只展开某一面而遗漏其他核心方面。建议包含以下小节"
+            f"（按问题性质取舍，但核心方面不可缺）：\n"
+            f"  1. 核心概念与定义（关键术语首次出现时给简明解释）\n"
+            f"  2. 工作原理/机制\n"
+            f"  3. 关键步骤/流程\n"
+            f"  4. 关键技术点与组件\n"
+            f"  5. 最佳实践\n"
+            f"  6. 常见误区与边界情况\n"
+            f"  7. （工程类）评测/部署/运维/回滚/可观测要点\n"
+            f"确保每个核心方面都有实质内容，而非仅罗列标题。\n\n"
             f"输出JSON: {{\"title\": \"标题\", \"content_markdown\": \"讲义内容\", "
             f"\"difficulty_note\": \"难度说明\"}}"
         )

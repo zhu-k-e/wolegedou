@@ -12,6 +12,7 @@
   python scripts/fetch_assets.py --numpy-src <含 vectors.npy 的目录>
 """
 import argparse
+import glob
 import os
 import shutil
 import subprocess
@@ -60,14 +61,39 @@ def copy_numpy(src: str) -> int:
     return 0
 
 
-def check() -> int:
+def merge_vectors(parts: list[str], target: str) -> int:
+    """按 .part0/.part1/.partN 顺序合并成完整 vectors.npy。"""
+    parts = sorted(parts, key=lambda p: int(p.split(".part")[-1]))
+    print(f"[merge] 合并 {len(parts)} 个分卷 -> {target}")
+    try:
+        with open(target, "wb") as out:
+            for part in parts:
+                with open(part, "rb") as f:
+                    out.write(f.read())
+        print(f"[ok] 合并完成: {target}")
+        return 0
+    except Exception as e:
+        print(f"[error] 合并失败：{e}")
+        return 1
+
+
+def check(auto_merge: bool = True) -> int:
     model_ok = os.path.isdir(MODEL_DIR) and any(os.scandir(MODEL_DIR))
-    numpy_ok = all(
-        os.path.exists(os.path.join(NUMPY_DIR, f))
-        for f in ["vectors.npy", "documents.json", "metadatas.json", "ids.json"]
-    )
-    print(f"bge_m3:    {'OK' if model_ok else 'MISSING -> 运行 --model-only'}")
-    print(f"numpy_kb:   {'OK' if numpy_ok else 'MISSING -> 见 SETUP.md 步骤 3'}")
+    required = ["vectors.npy", "documents.json", "metadatas.json", "ids.json"]
+    missing = [f for f in required if not os.path.exists(os.path.join(NUMPY_DIR, f))]
+
+    # 若 vectors.npy 缺失但存在分卷，自动合并
+    if "vectors.npy" in missing and auto_merge:
+        parts = sorted(glob.glob(os.path.join(NUMPY_DIR, "vectors.npy.part*")))
+        if parts:
+            if merge_vectors(parts, os.path.join(NUMPY_DIR, "vectors.npy")) == 0:
+                missing.remove("vectors.npy")
+        else:
+            print("[warn] 未找到 vectors.npy 分卷文件，无法自动合并")
+
+    numpy_ok = len(missing) == 0
+    print(f"bge_m3:     {'OK' if model_ok else 'MISSING -> 运行 --model-only'}")
+    print(f"numpy_kb:   {'OK' if numpy_ok else f'MISSING -> {missing}'}")
     return 0 if (model_ok and numpy_ok) else 1
 
 

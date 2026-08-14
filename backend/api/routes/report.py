@@ -244,6 +244,7 @@ async def get_report(session_id: str) -> LearningReport:
             "knowledge_level": knowledge_level,
             "domain_hint": profile.get("domain_hint", []),
             "domain_confidence": domain_confidence,
+            "test_results": profile.get("test_results", []),
         },
         knowledge_heatmap=heatmap,
         difficulty_match=match_curve,

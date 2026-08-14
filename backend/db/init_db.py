@@ -103,6 +103,7 @@ DDL_STATEMENTS = [
         complexity_estimate TEXT NOT NULL,
         intent_type         TEXT NOT NULL,
         domain_confidence   TEXT NOT NULL,    -- JSON对象
+        test_results        TEXT NOT NULL DEFAULT '[]',  -- JSON数组：理论测试成绩
         created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(session_id, version),
         FOREIGN KEY(session_id) REFERENCES session(session_id)
@@ -275,6 +276,7 @@ def init_database():
 
         # 安全加列（已有数据库兼容）
         _safe_add_column(conn, "task_metrics", "override_reason", "TEXT")
+        _safe_add_column(conn, "student_profiles", "test_results", "TEXT")
 
         # 写入系统配置种子数据
         _seed_system_config(conn)

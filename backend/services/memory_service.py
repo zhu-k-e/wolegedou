@@ -274,15 +274,41 @@ class MemoryService:
         referee_verdict: str,
         referee_modifications: int = 0,
         rework_type: str = "none",
+        offline: bool = False,
     ):
         """一次任务完成后，完整更新贡献记忆
 
-        1. EMA更新accuracy
-        2. EMA更新rework_rate
-        3. 计算importance_score
+        1. EMA更新accuracy（offline任务跳过）
+        2. EMA更新rework_rate（offline任务跳过）
+        3. 计算importance_score（offline任务固定0.5）
         4. 记录contribution_memory
-        5. 检查淘汰
+        5. 检查淘汰（offline任务跳过）
+        6. α动态切换检查（offline任务跳过）
+
+        Args:
+            offline: 离线评估任务（如benchmark）。只写contribution_memory（task_type=offline_eval），
+                     不更新agent_performance，不触发淘汰/α切换，避免自进化被测试数据污染。
         """
+        if offline:
+            # 离线评估：只留痕，不参与自进化
+            memory_repo.save_contribution_memory(
+                task_id=task_id,
+                agent_id=agent_id,
+                function_tag=function_tag,
+                task_type=task_type,
+                segment=segment,
+                review_score=review_score,
+                importance_score=0.5,
+                referee_verdict=referee_verdict,
+                referee_modifications=referee_modifications,
+                rework_type=rework_type,
+            )
+            logger.info(
+                f"[offline_eval] 贡献记忆已记录: task={task_id}, agent={agent_id}, tag={function_tag}, "
+                f"verdict={referee_verdict}, 不参与自进化"
+            )
+            return
+
         # 1. EMA更新accuracy
         new_accuracy, new_count = self.update_accuracy(agent_id, function_tag, review_score)
 

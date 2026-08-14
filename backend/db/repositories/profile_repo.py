@@ -21,6 +21,7 @@ def save_profile(
     complexity_estimate: str,
     intent_type: str,
     domain_confidence: dict,
+    test_results: list = None,
 ) -> int:
     """保存学情画像（版本号自增）"""
     # 确保会话存在（避免外键约束失败 / 孤儿记录）
@@ -29,13 +30,15 @@ def save_profile(
         """
         INSERT INTO student_profiles
             (session_id, version, knowledge_level, background, current_goal,
-             question_type, domain_hint, complexity_estimate, intent_type, domain_confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             question_type, domain_hint, complexity_estimate, intent_type, domain_confidence,
+             test_results)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (session_id, version, knowledge_level, background, current_goal,
          question_type, json.dumps(domain_hint, ensure_ascii=False),
          complexity_estimate, intent_type,
-         json.dumps(domain_confidence, ensure_ascii=False)),
+         json.dumps(domain_confidence, ensure_ascii=False),
+         json.dumps(test_results or [], ensure_ascii=False)),
     )
     return cursor.lastrowid
 
@@ -83,5 +86,6 @@ def _row_to_profile(row) -> dict:
         "complexity_estimate": row["complexity_estimate"],
         "intent_type": row["intent_type"],
         "domain_confidence": json.loads(row["domain_confidence"]),
+        "test_results": json.loads(row["test_results"]) if row["test_results"] else [],
         "created_at": row["created_at"],
     }

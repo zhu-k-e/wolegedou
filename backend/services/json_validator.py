@@ -126,14 +126,26 @@ class JSONValidator:
     # ============================================================
 
     def _layer2_regex_repair(self, raw: str, model_class: Type[T]) -> Optional[T]:
-        """正则提取 + 字段级修复"""
+        """正则提取 + 截断补齐 + 字段级修复"""
         try:
-            # 尝试提取最外层 {...} JSON块
             json_str = self._extract_json_block(raw)
+            if json_str is None:
+                # 首次提取失败（多半是截断导致括号不平衡），尝试补齐
+                json_str = self._repair_truncated_json(raw)
             if json_str is None:
                 return None
 
-            data = json.loads(json_str)
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                # 二次尝试截断补齐（覆盖首轮漏网的残缺形态）
+                repaired = self._repair_truncated_json(raw)
+                if repaired is None:
+                    return None
+                try:
+                    data = json.loads(repaired)
+                except json.JSONDecodeError:
+                    return None
 
             # 字段级修复
             data = self._repair_fields(data, model_class)
@@ -145,7 +157,7 @@ class JSONValidator:
             return None
 
     def _extract_json_block(self, raw: str) -> Optional[str]:
-        """提取最外层 {...} JSON块"""
+        """提取最外层 {...} JSON块（仅当括号平衡时返回）"""
         # 去除可能的 ```json 标记
         cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip()
 
@@ -164,6 +176,39 @@ class JSONValidator:
                     return cleaned[start:i + 1]
 
         return None
+
+    def _repair_truncated_json(self, raw: str) -> Optional[str]:
+        """截断兜底：针对 finish_reason=='length' 残留的不完整 JSON，补齐未闭合括号。
+
+        仅处理"括号不平衡"（截断特征）的情况；对结构完好但内容非法（如字段名错）
+        的 JSON 不做臆造式修复，避免产出伪合法的错误答案。
+        """
+        cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip()
+        start = cleaned.find("{")
+        if start == -1:
+            return None
+
+        depth = 0
+        last_brace = -1
+        for i in range(start, len(cleaned)):
+            if cleaned[i] == "{":
+                depth += 1
+            elif cleaned[i] == "}":
+                depth -= 1
+                last_brace = i
+                if depth == 0:
+                    # 已平衡，无需补齐
+                    return cleaned[start:i + 1]
+
+        # 截断：depth>0，从 start 到末尾补齐未闭合括号
+        if depth <= 0:
+            return None
+        truncated = cleaned[start:]
+        # 若末尾字符串未闭合（奇数个引号），先补引号再补括号，避免引号吞掉右括号
+        if truncated.count('"') % 2 == 1:
+            truncated += '"'
+        truncated += "}" * depth
+        return truncated
 
     def _repair_fields(self, data: dict, model_class: Type[T]) -> dict:
         """字段级修复：类型转换、默认值填充"""

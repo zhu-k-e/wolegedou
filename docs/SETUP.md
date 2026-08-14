@@ -38,17 +38,21 @@ git clone https://hf-mirror.com/BAAI/bge-m3 data/bge_m3_model
 
 ## 3. 补齐预计算向量库 numpy_kb
 
-`data/numpy_kb/` 由领域语料离线构建，含 34154 条 chunk 的 1024 维向量。获取方式二选一：
+`data/numpy_kb/` 由领域语料离线构建，含 34154 条 chunk 的 1024 维向量。
 
-- **评审资产包**：从发榜方 / 提交附件获取 `numpy_kb.zip`，解压到 `data/numpy_kb/` 即可；
-- **本地已有源**：若你机器上保留过原始语料，可用团队内部构建流程（依赖 `data/raw_docs/`，
-  该目录同样不入 Git，需另行提供）离线重建向量库到 `data/numpy_kb/`。
-
-校验是否就绪：
+**仓库已随代码提交分卷数据**（`vectors.npy` 133MB 超过 GitHub 单文件 100MB 限制，拆分为 `vectors.npy.part0` / `.part1`，每卷约 67MB）。clone 后执行：
 
 ```bash
 python scripts/fetch_assets.py --check
 # 期望输出：bge_m3: OK / numpy_kb: OK
+```
+
+`fetch_assets.py --check` 会自动合并分卷生成完整的 `data/numpy_kb/vectors.npy`。
+
+如分卷缺失，也可手动合并：
+
+```bash
+cat data/numpy_kb/vectors.npy.part* > data/numpy_kb/vectors.npy
 ```
 
 ## 4. 配置

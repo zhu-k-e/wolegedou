@@ -1,37 +1,40 @@
 # ============================================================
-# 多智能体协同决策系统 - Python依赖
-# 安装方式: pip install -r requirements.txt
+# 多智能体协同决策系统 - Python 依赖（已锁定版本）
+# 安装方式：pip install -r requirements.txt
+# Python 版本：3.13（项目强依赖 FlagEmbedding / bge-m3）
+# 注意：torch CPU 版通过下方 --extra-index-url 指定
 # ============================================================
 
-# --- Web框架 ---
-fastapi>=0.110.0          # 异步Web框架，适合多LLM调用编排
-uvicorn[standard]>=0.29.0 # ASGI服务器
-websockets>=12.0          # WebSocket实时状态推送
-python-multipart>=0.0.9   # 表单解析
+--extra-index-url https://download.pytorch.org/whl/cpu
 
-# --- LLM调用 ---
-openai>=1.30.0            # OpenAI兼容客户端（GPT-4o / DeepSeek / Qwen等）
+# --- Web 框架 ---
+fastapi==0.139.0          # 异步 Web 框架，适合多 LLM 调用编排
+uvicorn[standard]==0.51.0 # ASGI 服务器
+websockets==16.1          # WebSocket 实时状态推送
+python-multipart==0.0.32  # 表单解析
+
+# --- LLM 调用 ---
+openai==2.45.0            # OpenAI 兼容客户端（Qwen / DeepSeek 等）
 
 # --- 数据校验 ---
-pydantic>=2.7.0           # 数据模型校验
-pydantic-settings>=2.2.0  # 环境变量配置管理
+pydantic==2.13.4          # 数据模型校验
+pydantic-settings==2.14.2 # 环境变量配置管理
 
 # --- 向量知识库（RAG 检索） ---
-chromadb>=0.5.0            # 向量数据库
-FlagEmbedding>=1.2.0       # bge-m3 多语言 Embedding（方案书 6.4 推荐）
-# sentence-transformers>=2.7.0  # 备选 Embedding 后端（不装 FlagEmbedding 时用）
-
-# --- 数据库 ---
-# sqlite3为Python内置，无需安装
+chromadb==1.5.9           # 向量数据库
+FlagEmbedding==1.4.0      # bge-m3 多语言 Embedding（方案书 6.4 推荐）
+numpy==2.5.1              # FlagEmbedding / torch 运行时强依赖
+torch==2.7.1+cpu          # CPU 版 torch（避免 GPU 依赖，配合 OMP_NUM_THREADS=1 防段错误）
+transformers==5.14.1      # bge-m3 模型加载依赖
 
 # --- 工具 ---
-python-dotenv>=1.0.0      # 读取.env配置文件
-loguru>=0.7.0             # 日志（比print好用，便于调试Agent链路）
-httpx>=0.27.0             # 异步HTTP客户端
+python-dotenv==1.2.2      # 读取 .env 配置文件
+loguru==0.7.3             # 日志（便于调试 Agent 链路）
+httpx==0.28.1             # 异步 HTTP 客户端
 
 # --- 测试 ---
-pytest>=8.0.0             # 单元测试框架
-pytest-asyncio>=0.23.0    # 异步测试支持
+pytest==9.1.1             # 单元测试框架
+pytest-asyncio==1.4.0     # 异步测试支持
 
 # --- 文档处理（知识库文档导入用） ---
-pypdf>=4.0.0               # PDF解析（导入PDF文档到知识库）
+pypdf==4.0.0              # PDF 解析（导入 PDF 文档到知识库）

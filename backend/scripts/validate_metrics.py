@@ -1,19 +1,21 @@
 """量化指标验证脚本（方案书第七部分）
 
 对齐赛题 4 项量化指标，从数据库自动统计 + 知识库召回率测试：
-  1. 专业知识谬误率 < 5%  (目标 <=3%)  — Verifier 事实准确率代理指标
-  2. 适配准确率 >= 85%    (目标 >=90%) — Evaluator 教学适配度 + 学生反馈
-  3. 核心知识点覆盖率 >= 90% (目标 >=95%) — 裁判团溯源验证率
-  4. 幻觉率（附加）       (目标 <=3%)  — 裁判团 verdict 分布
+  1. 专业知识谬误率 < 5%  — LLM 复核（参考要点 vs 生成讲义）
+  2. 适配准确率 >= 85%    — LLM 复核（expected_complexity vs 生成讲义难度）
+  3. 核心知识点覆盖率 >= 90% — 生成文本对 test_cases_100 reference_answer_points 命中率
+  4. 幻觉率（附加）       — 裁判团 verdict 分布
 
-事实比对指标（离线，无 LLM，需先运行 benchmark_testcases 生成资源）：
-  - 核心知识点覆盖率(事实) >= 90% — 生成文本对 test_cases_100 reference_answer_points 命中率
-  - 适配准确率(事实/启发) >= 85% — expected_complexity vs 生成资源难度说明
+事实比对指标（需先运行 benchmark_testcases 生成资源）：
+  - 核心知识点覆盖率(事实) >= 90% — 关键词命中率
+  - 适配准确率(事实) >= 85% — LLM 复核
+  - 专业知识谬误率 < 5%   — LLM 复核
 
 用法:
-  python -m backend.scripts.validate_metrics              # 全量验证
-  python -m backend.scripts.validate_metrics --kb-only     # 仅知识库召回率测试
+  python -m backend.scripts.validate_metrics              # 全量验证（默认启用 LLM 复核）
   python -m backend.scripts.validate_metrics --no-kb       # 跳过知识库测试（无需加载 bge-m3）
+  python -m backend.scripts.validate_metrics --no-llm      # 禁用 LLM 复核（回退到旧口径）
+  python -m backend.scripts.validate_metrics --kb-only     # 仅知识库召回率测试
   python -m backend.scripts.benchmark_testcases           # 跑 100 基准用例生成资源(供事实指标)
 """
 
@@ -31,6 +33,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from backend.db.database import query_all, query_one
+from backend.scripts.metrics_llm_judge import MetricsLLMJudge
 from loguru import logger
 
 # ============================================================
@@ -97,8 +100,10 @@ KB_TEST_QUERIES = [
 class MetricsCalculator:
     """从数据库计算 4 项量化指标"""
 
-    def __init__(self, bm_only: bool = False):
+    def __init__(self, bm_only: bool = False, use_llm: bool = True):
         self.bm_only = bm_only
+        self.use_llm = use_llm
+        self._llm_judge_results: dict[str, dict] = {}
         all_tm = query_all("SELECT * FROM task_metrics")
         # 转 dict 以支持 .get 访问（query_all 返回 Row 对象）
         all_tm = [dict(r) for r in all_tm]
@@ -144,23 +149,144 @@ class MetricsCalculator:
     def has_data(self) -> bool:
         return len(self.task_metrics) > 0 or len(self.contribution_memory) > 0
 
+    # --- LLM 复核入口（替代有污染的自评/启发式口径） ---
+    def _build_judge_items(self) -> list[dict]:
+        """为可配对用例构造 LLM judge 输入（硬化版：讲义+练习+测验全文）。"""
+        items = []
+        for tc, res in self._build_pairs():
+            q = tc.get("question", "")
+            exp = tc.get("expected_complexity")
+            refs = tc.get("reference_answer_points") or []
+            if not exp or not refs:
+                continue
+            lecture = self._col_text(res, "lecture")
+            practice = self._col_text(res, "practice_guide")
+            quiz = self._col_text(res, "quiz")
+            # 至少一个内容非空才送审
+            if not (lecture or practice or quiz):
+                continue
+            items.append({
+                "question": q,
+                "expected_complexity": exp,
+                "reference_points": refs,
+                "lecture_text": lecture,
+                "practice_text": practice,
+                "quiz_text": quiz,
+                "norm_q": self._norm_q(q),
+            })
+        return items
+
+    @staticmethod
+    def _lecture_text_for_judge(res: dict) -> str:
+        """从 task_resources 提取供 judge 使用的讲义文本。"""
+        raw = res.get("lecture")
+        if not raw:
+            return ""
+        try:
+            obj = json.loads(raw)
+            if not isinstance(obj, dict):
+                return str(raw)
+            parts = []
+            for k in ("title", "difficulty_note", "content_markdown"):
+                v = obj.get(k)
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+            return "\n\n".join(parts)
+        except Exception:
+            return str(raw)
+
+    @staticmethod
+    def _col_text(res: dict, col: str) -> str:
+        """从 task_resources 某列(JSON)递归抽取全部文本（硬化版用于练习/测验全文复核）。"""
+        raw = res.get(col)
+        if not raw:
+            return ""
+        try:
+            obj = json.loads(raw)
+            parts = []
+            def _walk(o):
+                if isinstance(o, str):
+                    parts.append(o)
+                elif isinstance(o, dict):
+                    for v in o.values():
+                        _walk(v)
+                elif isinstance(o, (list, tuple)):
+                    for v in o:
+                        _walk(v)
+            _walk(obj)
+            return "\n\n".join(p.strip() for p in parts if isinstance(p, str) and p.strip())
+        except Exception:
+            return str(raw)
+
+    async def _async_ensure_llm_judge_results(self) -> dict[str, dict]:
+        """异步批量调用 LLM judge，结果按归一化问题索引。"""
+        if self._llm_judge_results:
+            return self._llm_judge_results
+        items = self._build_judge_items()
+        if not items:
+            logger.warning("无可用 LLM judge 样本（缺少 expected_complexity/reference_answer_points/lecture）")
+            self._llm_judge_results = {}
+            return self._llm_judge_results
+
+        logger.info(f"开始 LLM 复核 {len(items)} 条用例（适配准确率 + 专业知识谬误率）...")
+        judge = MetricsLLMJudge()
+        results = await judge.judge_batch(items)
+        self._llm_judge_results = {
+            item["norm_q"]: result
+            for item, result in zip(items, results)
+            if not result.get("_failed")
+        }
+        failed = sum(1 for r in results if r.get("_failed"))
+        if failed:
+            logger.warning(f"LLM judge 失败 {failed}/{len(items)} 条，已排除")
+        logger.info(f"LLM 复核完成，有效样本 {len(self._llm_judge_results)}/{len(items)}")
+        return self._llm_judge_results
+
+    def ensure_llm_judge_results(self) -> dict[str, dict]:
+        """同步包装：确保 LLM judge 结果已加载。"""
+        if not self.use_llm:
+            return {}
+        if self._llm_judge_results:
+            return self._llm_judge_results
+        try:
+            return asyncio.run(self._async_ensure_llm_judge_results())
+        except Exception as e:
+            logger.warning(f"LLM judge 初始化失败，回退到旧口径: {e}")
+            return {}
+
     # --- 指标1: 专业知识谬误率 ---
     def calc_error_rate(self) -> dict:
-        """谬误率 = 1 - avg(fact_accuracy)
+        """专业知识谬误率 = 生成内容相对参考要点存在事实错误的样本比例。
 
-        fact_accuracy 来自 Verifier 事实核查评分（0-1）。
-        谬误率 ≈ 1 - 事实准确率，作为代理指标。
-        数据源优先级: task_metrics.fact_accuracy > contribution_memory.review_score
+        优先使用 LLM 复核（外部真值口径）；LLM 不可用时回退到 Verifier 自评。
         """
-        # 优先用 task_metrics 的 fact_accuracy
+        # 优先用 LLM 复核
+        judge_results = self.ensure_llm_judge_results()
+        if judge_results:
+            error_scores = []
+            for r in judge_results.values():
+                # 有错误 = 置信度加权错误分；无错误 = 0
+                if r.get("factual_error"):
+                    error_scores.append(r.get("factual_confidence", 1.0))
+                else:
+                    error_scores.append(0.0)
+            if error_scores:
+                value = sum(error_scores) / len(error_scores)
+                return {
+                    "value": value,
+                    "sample_count": len(error_scores),
+                    "source": "LLM 复核 (reference_answer_points vs 生成讲义)",
+                    "detail": f"errors={sum(1 for s in error_scores if s > 0)}, avg_confidence={value:.3f}",
+                }
+
+        # 回退：Verifier 自评（存在 0.5 兜底污染，仅作 fallback）
         fact_scores = [
             r["fact_accuracy"] for r in self.task_metrics
             if r["fact_accuracy"] is not None
         ]
-        source = "task_metrics.fact_accuracy"
+        source = "task_metrics.fact_accuracy (Verifier 自评，fallback)"
 
         if not fact_scores:
-            # fallback: contribution_memory.review_score（含逻辑+适配，非纯事实分）
             review_scores = [
                 r["review_score"] for r in self.contribution_memory
                 if r["review_score"] is not None
@@ -269,45 +395,38 @@ class MetricsCalculator:
             "detail": detail,
         }
 
-    # --- 指标4: 幻觉率 ---
+    # --- 指标4: 幻觉率（真实测量）---
     def calc_hallucination_rate(self) -> dict:
-        """幻觉率 = count(verdict IN ('failed', 'revise')) / total
+        """幻觉率 = 生成讲义含「无根据编造」的样本比例。
 
-        裁判团未通过的输出占比（方案书 7.1 节定义）。
-        'failed' 和 'revise' 表示输出有问题，视为幻觉代理指标。
+        真测量：复用 MetricsLLMJudge 的 hallucination 字段 ——
+        LLM 检测生成内容是否包含参考要点中未出现、且明显编造/无可靠依据的具体断言
+        （虚构数据/API/论文/人物/命令/代码）。与 error_rate（事实错误）互补、口径不同。
+
+        无 LLM 时回退到「裁判不通过/强制放行占比」（真实但口径不同，已在 source 标注）。
         """
-        # 优先用 task_metrics.verdict
+        # 优先用 LLM 复核（外部真值口径）
+        judge_results = self.ensure_llm_judge_results()
+        if judge_results:
+            flags = [r for r in judge_results.values() if not r.get("_failed")]
+            if flags:
+                n = sum(1 for r in flags if r.get("hallucination"))
+                return {
+                    "value": n / len(flags),
+                    "sample_count": len(flags),
+                    "source": "LLM 复核 (HIGH档, 全文+练习+测验, 检测无根据编造/似真但错误)",
+                    "detail": f"hallucinated={n}/{len(flags)}",
+                }
+
+        # 回退：裁判不通过/强制放行占比（real，但非字面幻觉率）
         if self.task_metrics:
             total = len(self.task_metrics)
-            hallucination_count = sum(
-                1 for r in self.task_metrics
-                if r["verdict"] in ("failed", "revise")
-            )
-            source = "task_metrics.verdict"
-            detail_parts = []
-            for v in ("passed", "low_confidence_passed", "revise", "failed"):
-                c = sum(1 for r in self.task_metrics if r["verdict"] == v)
-                if c > 0:
-                    detail_parts.append(f"{v}={c}")
+            n = sum(1 for r in self.task_metrics if r.get("override_reason") is not None)
             return {
-                "value": hallucination_count / total if total > 0 else None,
+                "value": n / total if total > 0 else None,
                 "sample_count": total,
-                "source": source,
-                "detail": ", ".join(detail_parts),
-            }
-
-        # fallback: contribution_memory.referee_verdict
-        if self.contribution_memory:
-            total = len(self.contribution_memory)
-            hallucination_count = sum(
-                1 for r in self.contribution_memory
-                if r["referee_verdict"] in ("failed", "revise")
-            )
-            return {
-                "value": hallucination_count / total if total > 0 else None,
-                "sample_count": total,
-                "source": "contribution_memory.referee_verdict",
-                "detail": f"failed+revise={hallucination_count}/{total}",
+                "source": "task_metrics.override_reason (无LLM回退：裁判不通过/强放占比，非字面幻觉率)",
+                "detail": f"force_passed={n}/{total}",
             }
 
         return {"value": None, "sample_count": 0, "source": "无数据", "detail": ""}
@@ -519,10 +638,9 @@ class MetricsCalculator:
         }
 
     def calc_factual_adaptation_rate(self) -> dict:
-        """适配准确率(事实/启发) = 难度匹配的用例数 / 可判定的用例数
+        """适配准确率 = 生成资源难度与 expected_complexity 匹配的样本比例。
 
-        expected_complexity(simple/medium/complex) 与生成资源难度说明的启发式
-        识别结果比对。无难度信号(纯内容无难度词)的用例不计入可判定样本。
+        优先使用 LLM 复核（外部真值口径）；LLM 不可用时回退到关键词启发式。
         """
         pairs = self._build_pairs()
         if not pairs:
@@ -532,6 +650,33 @@ class MetricsCalculator:
                 "source": "task_resources 中无与 test_cases_100 匹配的问题",
                 "detail": "请先运行基准评测生成资源: python -m backend.scripts.benchmark_testcases",
             }
+
+        # 优先用 LLM 复核
+        judge_results = self.ensure_llm_judge_results()
+        if judge_results:
+            matched = 0
+            judged = 0
+            for tc, res in pairs:
+                exp = (tc.get("expected_complexity") or "").lower()
+                if exp not in ("simple", "medium", "complex"):
+                    continue
+                norm_q = self._norm_q(tc.get("question", ""))
+                r = judge_results.get(norm_q)
+                if not r:
+                    continue
+                judged += 1
+                if r.get("adaptation_matched"):
+                    matched += 1
+            if judged > 0:
+                value = matched / judged
+                return {
+                    "value": value,
+                    "sample_count": judged,
+                    "source": "LLM 复核 (expected_complexity vs 生成讲义难度)",
+                    "detail": f"judged={judged}, matched={matched}",
+                }
+
+        # 回退：关键词启发式（LLM 不可用时）
         matched = 0
         judged = 0
         no_signal = 0
@@ -551,14 +696,14 @@ class MetricsCalculator:
             return {
                 "value": None,
                 "sample_count": len(pairs),
-                "source": "expected_complexity vs 生成难度说明(启发式)",
+                "source": "expected_complexity vs 生成难度说明(启发式, fallback)",
                 "detail": f"配对用例均无难度信号(no_signal={no_signal})",
             }
         value = matched / judged
         return {
             "value": value,
             "sample_count": judged,
-            "source": "expected_complexity vs 生成资源难度说明(启发式, 待 LLM 复核)",
+            "source": "expected_complexity vs 生成资源难度说明(启发式, fallback)",
             "detail": f"judged={judged}, matched={matched}, no_signal={no_signal}",
         }
 
@@ -807,8 +952,8 @@ def generate_markdown_report(metrics: dict, kb_result: dict | None, targets: dic
     lines.append("|------|-----------|-----------|")
     lines.append("| 核心知识点覆盖率 | 100 道测试题核心知识点覆盖 | 生成资源对 `reference_answer_points` 的关键术语命中率（离线、零 LLM 调用） |")
     lines.append("| 适配准确率 | 学情测试 + 难度匹配 | `expected_complexity` 与生成资源难度说明的难度桶匹配率 |")
-    lines.append("| 幻觉率 | 裁判团 verdict 分布 | count(verdict in failed/revise) / total |")
-    lines.append("| 专业知识谬误率 | 100 道测试题人工核验 | 当前为 Verifier 自评代理，**待人工/LLM 标注替换**（见下方局限） |")
+    lines.append("| 幻觉率 | 无根据编造/似真但错误占比 | `MetricsLLMJudge.hallucination`（硬化版）：HIGH 档 judge 检测生成内容（讲义+练习+测验全文）含参考要点未出现、且无可靠依据或明显错误的具体事实断言（虚构数据/API/论文/人物/命令/代码，或与公认事实矛盾、似真但错误，或强加不存在的能力）的样本比例；判定去除“不确定就给 false”的纵容 |")
+    lines.append("| 专业知识谬误率 | 100 道测试题人工核验 | `MetricsLLMJudge.factual_error`：LLM 复核生成讲义相对 `reference_answer_points` 的事实错误；无 LLM 时回退 Verifier 自评 |")
     lines.append("")
     lines.append("### 过程观测指标（系统自评）")
     lines.append("")
@@ -820,12 +965,10 @@ def generate_markdown_report(metrics: dict, kb_result: dict | None, targets: dic
     lines.append("")
     lines.append("### 已知局限")
     lines.append("")
-    lines.append("1. **专业知识谬误率**仍依赖 Verifier 自评（`1 - avg(fact_accuracy)`），"
-                 "而 Verifier 在知识库检索为空时会给出 0.0 / 兜底 0.5，使该值失真；"
-                 "正式评测需以人工或强模型标注替换。")
-    lines.append("2. **适配准确率**当前用难度说明的关键词启发式判定难度桶，"
-                 "对措辞敏感，建议正式评测时改由 LLM 复核。")
-    lines.append("3. 事实比对基于关键术语命中，可能低估同义改写的覆盖情况。")
+    lines.append("1. **专业知识谬误率**与**适配准确率**默认启用 LLM 复核（对照 test_cases_100 "
+                 "reference_answer_points / expected_complexity），比 Verifier 自评和关键词启发式更接近外部真值；"
+                 "若使用 `--no-llm` 则回退到旧口径，会重新引入测量污染。")
+    lines.append("2. **核心知识点覆盖率**基于关键术语命中，可能低估同义改写覆盖情况。")
     lines.append("")
 
     return "\n".join(lines)
@@ -835,11 +978,11 @@ def generate_markdown_report(metrics: dict, kb_result: dict | None, targets: dic
 # 主入口
 # ============================================================
 
-def main(run_kb: bool = True, bm_only: bool = False):
+def main(run_kb: bool = True, bm_only: bool = False, use_llm: bool = True):
     logger.info("开始量化指标验证...")
 
     # 1. 从 DB 计算指标
-    calc = MetricsCalculator(bm_only=bm_only)
+    calc = MetricsCalculator(bm_only=bm_only, use_llm=use_llm)
     if not calc.has_data:
         print()
         print("WARNING: 数据库中无 task_metrics 或 contribution_memory 数据。")
@@ -886,6 +1029,7 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     run_kb = True
     bm_only = False
+    use_llm = "--no-llm" not in args
     if "--no-kb" in args:
         run_kb = False
     if "--bm-only" in args:
@@ -907,4 +1051,4 @@ if __name__ == "__main__":
         print()
         sys.exit(0)
 
-    sys.exit(main(run_kb=run_kb, bm_only=bm_only))
+    sys.exit(main(run_kb=run_kb, bm_only=bm_only, use_llm=use_llm))
