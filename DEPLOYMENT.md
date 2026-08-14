@@ -66,7 +66,6 @@ docker build -t wolegedou-backend .
 docker run -d --name wolegedou \
   --env-file .env \
   -p 8000:8000 \
-  -v "$(pwd)/data:/app/data" \
   wolegedou-backend
 ```
 
@@ -74,9 +73,15 @@ docker run -d --name wolegedou \
 
 - `Dockerfile` 已内置 `ENV OMP_NUM_THREADS=1`，无需额外设置。
 - `.env` **不进镜像**（含 API Key），请用 `--env-file` 或 `-e` 注入。
-- 知识库切片：`data/numpy_kb/` 已拆分为 `vectors.npy.part0` / `.part1` 分卷随仓库提交，
-  首次 clone/镜像构建后运行 `python scripts/fetch_assets.py --check` 自动合并为完整 `vectors.npy`。
-  体积较大的 Chroma 向量库建议运行时挂载（`-v $(pwd)/data:/app/data`），不入镜像。
+- **知识库切片已随镜像分发**：`data/numpy_kb/` 以 `vectors.npy.part0` / `.part1` 分卷
+  随仓库提交并 `COPY` 进镜像；容器启动时由 `docker-entrypoint.sh` **自动合并**为完整
+  `vectors.npy`（RAG 加载器硬性要求该文件），无需手动执行。
+- **bge-m3 嵌入模型**：镜像**不内置**该模型（约 2.2GB）。容器首次启动若检测到
+  `data/bge_m3_model/` 缺失，会**自动**从 hf-mirror 国内镜像 `git clone` 拉取（需外网，
+  耗时视带宽）。若构建/运行环境无外网，请预先把本地已下载的 `data/bge_m3_model` 以
+  `-v "$(pwd)/data:/app/data"` 挂载进容器，或构建前将其放入 `data/`。
+- 如需用宿主机数据覆盖镜像内数据（如自行替换知识库），仍可加
+  `-v "$(pwd)/data:/app/data"`；entrypoint 会在挂载目录上同样完成分卷合并。
 - 端口默认 8000，可由 `PORT` 环境变量覆盖。
 
 ---
