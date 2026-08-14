@@ -76,7 +76,7 @@ python backend/main.py
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-接口约定与前端对接见 `docs/frontend_async_api.md` 与《前端对接指南.md》。
+接口约定与前端对接见 `docs/frontend_integration_guide.md`（《前端对接指南》）。
 公开演示可用 cloudflared 内网穿透：
 
 ```bash
