@@ -1,122 +1,125 @@
 {
   "session_id": "bm_TC-001",
   "input_profile": {
-    "id": 109,
     "session_id": "bm_TC-001",
     "version": 1,
     "knowledge_level": "入门",
-    "background": "文科",
+    "background": "cs_student",
     "current_goal": "深入理解原理",
     "question_type": "概念理解",
     "domain_hint": "[\"LLM基础\"]",
     "complexity_estimate": "单领域",
     "intent_type": "generation",
     "domain_confidence": "{\"LLM基础\": \"high\"}",
-    "created_at": "2026-08-03 15:47:12",
+    "created_at": "2026-08-13 17:25:57",
     "test_results": null
   },
   "decision_mid": {
-    "id": 882,
-    "task_id": "task_8d19e0b8a8e5",
+    "id": 982,
+    "task_id": "task_e83422d5e35c",
     "session_id": "bm_TC-001",
     "verdict": "passed",
-    "verification_rate": 0.875,
-    "traceability_total": 8,
-    "traceability_verified": 7,
-    "knowledge_refs_count": 2,
+    "verification_rate": 1.0,
+    "traceability_total": 13,
+    "traceability_verified": 13,
+    "knowledge_refs_count": 4,
     "fact_accuracy": 1.0,
     "logic_completeness": 0.8,
     "pedagogical_fit": 0.85,
     "review_score": 0.8833333333333333,
     "override_reason": null,
-    "created_at": "2026-08-13 09:54:52"
+    "created_at": "2026-08-13 17:25:57"
   },
   "output_resources": {
     "lecture": {
-      "title": "Token与词：大语言模型文本处理的基础概念",
-      "content_markdown": "# Token与词：大语言模型文本处理的基础概念\n\n## 一、核心概念与定义\n\n### 什么是Token？\n\n在大型语言模型（LLM）中，**Token** 是模型处理文本的基本单位。你可以把Token想象成乐高积木中的最小颗粒，模型通过拼装这些颗粒来理解整个句子。Token可以是完整的单词、单词的一部分（子词），甚至是一个字符。例如，单词 `playing` 可能被拆分成 `play` 和 `ing` 两个Token。\n\n**通俗理解**：Token就像切蛋糕的刀法，把一大块蛋糕切成小块，每一小块就是Token。切法不同，块的大小也不同。\n\n### 什么是词？\n\n**词** 是自然语言中的语义单位，通常由空格或标点分隔。例如，在句子 `The cat is playing.` 中，`cat` 是一个词，`playing` 也是一个词。词是我们日常交流中自然形成的语言单位。\n\n**通俗理解**：词就是我们平时说话时用到的“词”，比如“猫”、“玩”等。\n\n### Token与词的区别\n\nToken不一定是完整的词，可能是子词或字符。例如，`unbelievable` 可能被拆分为 `un`、`believe` 和 `able` 三个Token。这种拆分方式让模型能更好地处理各种词汇变化，同时控制词汇表的大小。\n\n**通俗理解**：Token是“机器视角”的最小单位，词是“人类视角”的最小单位。机器为了高效处理，常常把词再切小一点。\n\n## 二、工作原理：分词器如何工作？\n\n### 分词器的作用\n\n**分词器**（Tokenizer）是连接人类文本和模型输入之间的桥梁。它负责将原始文本切分成Token序列，并将每个Token映射到一个唯一的数字ID（Token ID），因为模型只能处理数字。\n\n**通俗理解**：分词器就像翻译官，把人类语言翻译成机器能懂的“数字语言”。\n\n### 分词器的常见算法\n\n- **BPE（Byte Pair Encoding）**：一种常用的分词算法，它从字符开始，逐步合并出现频率高的字符对，最终形成子词级别的Token。例如，`low` 和 `lower` 可以共享 `low` 这个Token，从而减少词汇表大小。\n- **WordPiece**：类似BPE，但合并规则略有不同，常用于BERT等模型。\n- **SentencePiece**：一种更灵活的分词器，可以直接处理原始文本，无需预分词，常用于多语言模型。\n\n**通俗理解**：这些算法就像不同的切蛋糕方法，有的切得大块些，有的切得小块些，但目的都是让模型更容易“吃”下去。\n\n### 分词器如何处理未登录词？\n\n当遇到词汇表中没有的词（未登录词）时，分词器会将其拆分成更小的子词或字符，确保每个部分都能在词汇表中找到。例如，`ChatGPT` 可能被拆分为 `Chat` 和 `GPT`。\n\n**通俗理解**：遇到不认识的新词，分词器会把它拆成认识的部分，就像遇到生僻字时拆成偏旁部首来理解。\n\n## 三、关键步骤：从文本到Token序列\n\n1. **输入文本**：例如，`I love playing football.`\n2. **分词**：分词器将文本切分成Token序列，可能的结果为：`I`、`love`、`play`、`ing`、`foot`、`ball`、`.`（具体取决于分词器的规则）。\n3. **映射ID**：每个Token被映射到词汇表中对应的数字ID，例如 `I` → 100，`love` → 200，等等。\n4. **模型处理**：模型接收Token ID序列，进行推理或生成。\n\n**通俗理解**：这个过程就像把一句话拆成一个个积木块，然后给每个积木块编号，最后把编号序列交给模型去拼装理解。\n\n## 四、关键技术点与组件\n\n### 词汇表（Vocabulary）\n\n词汇表是分词器维护的Token集合，每个Token对应一个唯一的ID。词汇表的大小直接影响模型的参数量和性能。词汇表过大，模型参数量增加，训练和推理成本上升；词汇表过小，Token拆分过细，序列长度变长，计算量增加。因此，分词器需要在词汇表大小和序列长度之间取得平衡。\n\n**通俗理解**：词汇表就像一本字典，字典太厚，查起来慢；字典太薄，很多词查不到，需要拆成更小的部分。\n\n### 特殊Token\n\n除了普通Token，分词器还会添加一些特殊Token，如 `[CLS]`（表示序列开始）、`[SEP]`（表示序列分隔）、`[PAD]`（用于填充）等。这些Token帮助模型理解输入的结构。\n\n**通俗理解**：特殊Token就像文章中的标点符号和格式标记，帮助模型理解句子的结构和边界。\n\n### 多语言分词差异\n\n不同语言的分词方式可能不同。例如，中文通常使用基于字的分词，因为中文没有天然的空格分隔。英文则可以使用基于空格和子词的分词。\n\n**通俗理解**：中文分词就像把一串珠子按意义切开，英文分词就像按空格把单词分开，但有时单词太长也要再切。\n\n## 五、最佳实践\n\n- **了解模型的分词器**：在使用某个LLM时，先了解其分词器的特点和词汇表大小，有助于预估输入文本的Token数量。\n- **控制输入长度**：由于模型有最大Token限制，处理长文本时需注意截断或分段。\n- **处理特定领域文本**：对于专业术语较多的文本，可以预先进行自定义分词，或使用领域微调的分词器。\n- **利用Token计数**：在API调用中，Token数量直接影响费用，合理规划Token使用可以降低成本。\n\n**通俗理解**：就像做饭前先了解食材的切法，才能更好地控制火候和分量。\n\n## 六、常见误区与边界情况\n\n- **误区一：Token等于词**：实际上Token可能是词的一部分，不能简单将Token数量等同于词数。\n- **误区二：所有语言分词方式相同**：不同语言差异很大，例如中文分词与英文分词完全不同。\n- **边界情况：未登录词**：新词或专有名词可能被拆分成多个Token，导致语义理解偏差。\n- **边界情况：标点符号**：标点符号通常也是Token，但有时会被忽略或合并，影响文本处理。\n\n**通俗理解**：这些误区就像以为所有蛋糕都切成方块，但实际有的切法不同，有的蛋糕还有夹心。\n\n## 七、总结与展望\n\n理解Token与词的区别是掌握LLM输入处理的关键。通过分词器，模型将人类语言转化为可计算的数字序列，从而理解并生成文本。对于快速上手应用，掌握Token概念有助于更有效地使用模型，例如优化输入长度、处理特殊文本等。未来，随着多模态模型的发展，Token的概念可能扩展到图像、音频等更多模态，但核心思想依然不变。\n\n**通俗理解**：Token是机器理解世界的“最小砖块”，理解它，你就迈出了使用大模型的第一步。\n",
-      "difficulty_note": "入门级概念，适合无编程背景的理科学生，通过生活类比和通俗解释帮助理解抽象概念，无需编程基础。",
+      "title": "Token：语言模型处理文本的基本单位",
+      "content_markdown": "# Token：语言模型处理文本的基本单位\n\n## 1. 核心概念与定义\n\n- **Token**：语言模型处理文本的基本单位，可以是单词、子词或字符。它是模型理解和生成文本的最小单元。\n- **词汇表（Vocabulary）**：模型能够识别和处理的所有Token的集合。每个Token在词汇表中都有一个唯一的索引（token_id）。\n- **Token化（Tokenization）**：将原始文本切分为Token序列的过程。\n- **未知词（[UNK]）**：当文本中的某个词不在词汇表中时，模型会将其标记为[UNK]，表示无法识别。\n\n> **通俗理解**：想象你正在玩积木，Token就像积木块，可以是大的（单词），也可以是小的（子词或字符）。模型就是用这些积木块来搭建理解文本的。词汇表就是所有积木块的清单，每个积木块都有一个编号。如果遇到清单里没有的积木，模型就会用一个特殊的“未知”积木代替。\n\n## 2. 工作原理/机制\n\n语言模型无法直接理解原始文本，需要将文本转换为数字表示。Token化就是实现这一转换的关键步骤。\n\n**Token化的过程**：\n1. 将输入文本按照一定的策略（如词级、子词级、字符级）切分为Token序列。\n2. 将每个Token映射到词汇表中的索引（token_id），形成数字序列。\n3. 模型处理这些数字序列，进行计算和生成。\n\n> **通俗理解**：就像把一句话拆成一个个单词，然后给每个单词一个编号，模型就通过编号来理解这句话。\n\n## 3. 关键步骤/流程\n\n### 3.1 文本切分策略\n\n- **词级切分**：按空格和标点将文本切分为单词，如“playing”作为一个Token。\n- **子词级切分**：使用BPE（Byte Pair Encoding）等算法，将常见词拆分为更小的子词，如“playing”拆为“play”和“ing”。\n- **字符级切分**：将文本拆分为单个字符，如“p”, “l”, “a”, “y”, “i”, “n”, “g”。\n\n> **通俗理解**：切分策略就像切蛋糕的方式，可以切成大块（词级），也可以切成小块（子词或字符）。不同方式影响模型对文本的理解和计算量。\n\n### 3.2 特殊处理\n\n- **未知词处理**：对于不在词汇表中的词，通常用[UNK]标记。\n- **大小写归一化**：可能将大写转换为小写，以减少词汇表大小。\n- **特殊Token**：如句子开始（[CLS]）、句子结束（[SEP]）等，用于标记边界。\n\n> **通俗理解**：就像处理拼写错误或生僻字，模型会用一个特殊标记表示“我不认识这个词”。\n\n## 4. 关键技术点与组件\n\n### 4.1 Token与词汇表的关系\n\n每个Token都对应于词汇表中的一个条目。当文本被Token化时，实际上是将其转换为词汇表中的一系列索引（token_ids）。如果某个词不在词汇表中，则通常会被标记为[UNK]。\n\n> **通俗理解**：词汇表就像一本字典，Token是字典里的词条，每个词条都有一个页码（索引）。模型通过页码来查找和计算。\n\n### 4.2 Token化对模型性能的影响\n\n- **计算成本**：Token数量越多，模型的计算成本越高。\n- **上下文长度**：模型能够处理的最大上下文长度受Token数量限制。\n- **模型表现力**：较大的词汇表或更细粒度的Token化策略可能提高模型的表现力，但会增加参数量和训练/推理时间。\n\n> **通俗理解**：Token就像行李，行李越多，搬运越费劲（计算成本高），但带的东西越全（表现力强）。\n\n## 5. 最佳实践\n\n- **理解Token化策略**：在使用LLM时，了解其Token化方式有助于优化提示词长度。例如，对于英文，子词级Token化可能将单词拆分为多个Token，增加Token数量。\n- **控制Token数量**：尽量精简提示词，避免不必要的冗长，以减少计算成本和避免超出上下文限制。\n- **处理未知词**：在特定领域（如专业术语）中，考虑模型词汇表是否覆盖，必要时提供解释或使用其他方式。\n\n> **通俗理解**：就像发短信有字数限制，Token数量就是模型的“字数”，我们要精打细算。\n\n## 6. 常见误区与边界情况\n\n- **误区一：Token等同于单词**：实际上，一个单词可能被拆分为多个Token，多个单词也可能合并为一个Token（如“New York”）。\n- **误区二：词汇表越大越好**：虽然大词汇表可能提高表现力，但会增加模型复杂度和计算成本，需要权衡。\n- **边界情况**：\n  - 多语言文本：不同语言的Token化策略可能不同。\n  - 代码文本：代码中的符号和空格可能被特殊处理。\n  - 表情符号：可能被拆分为多个Token或合并为一个Token。\n\n> **通俗理解**：就像“New York”是一个地名，但可能被当成一个Token，也可能被拆成两个。\n\n## 7. 总结与扩展\n\nToken是理解LLM输入处理机制的基础。掌握Token化的基本原理，有助于优化提示词长度、理解模型输出限制，以及进行更高效的模型应用。\n\n对于快速上手，建议先掌握基本概念，再逐步深入学习具体实现和优化策略。\n\n> **通俗理解**：Token就像搭房子的砖块，了解砖块的特性，才能更好地搭建和理解整个建筑（模型）。",
+      "difficulty_note": "入门级概念，但Token化细节可能复杂。建议先掌握基本概念，再逐步深入学习具体实现和优化策略。",
       "knowledge_refs_display": [
         {
           "source": "Google GenAI Best Practices_gemma_docs_agile_classifiers.ipynb.md",
           "verification_status": "已验证"
         },
         {
-          "source": "Google GenAI Best Practices_gemma_docs_agile_classifiers.ipynb.md",
+          "source": "Google GenAI Best Practices_gemini-api_docs_model-tuning_rest.ipynb.md",
+          "verification_status": "已验证"
+        },
+        {
+          "source": "（知识库补全）",
+          "verification_status": "已验证"
+        },
+        {
+          "source": "（知识库补全）",
           "verification_status": "已验证"
         }
       ]
     },
     "practice_guide": {
-      "goal": "理解Token与词的区别，并掌握在LLM应用中如何利用这一概念处理文本数据",
-      "env_setup": "无需编程环境，仅需具备基本的概念理解能力。建议准备纸笔用于记录关键点。",
-      "steps_markdown": "### 实操指南：理解Token与词的区别\n\n#### 步骤1：理解基本概念\n- **Token**：在LLM中，Token是模型处理文本的最小单元，可以是单词、子词或字符。\n- **词**：自然语言中的语义单位，通常由空格或标点分隔。\n\n#### 步骤2：通过示例区分Token与词\n- 示例句子：\"The cat is playing.\"\n  - 词：The, cat, is, playing\n  - Token（可能）：The, cat, is, play, ing （因为\"playing\"可能被拆分为\"play\"和\"ing\"）\n- 注意：Token不一定是完整的词，可能是子词或字符。\n\n#### 步骤3：了解分词器的作用\n- 分词器（如BPE）将文本切分成Token，以平衡词汇表大小和模型性能，并处理未登录词。\n- 不同语言分词方式不同，例如中文通常基于字分词。\n\n#### 步骤4：应用场景思考\n- 在处理长文本或特定领域文本时，理解Token概念有助于预估模型输入长度和成本。\n- 例如，在调用LLM API时，Token数量直接影响费用，了解文本的Token化方式有助于优化输入。\n\n#### 步骤5：决策检查清单\n- [ ] 我是否知道我的文本会被如何分词？\n- [ ] 我是否了解不同分词方式对Token数量的影响？\n- [ ] 我是否能在实际应用中利用Token概念来优化输入？\n\n#### 步骤6：伪代码示例（仅帮助理解，无需手动运行）\n```\n# 伪代码：演示分词过程\n文本 = \"The cat is playing.\"\n分词器 = 加载分词器()\nToken序列 = 分词器.分词(文本)\n打印(Token序列)  # 输出可能为 [\"The\", \"cat\", \"is\", \"play\", \"ing\"]\n```\n\n#### 步骤7：总结与回顾\n- 回顾Token与词的区别，并思考在哪些场景下需要关注Token化。",
-      "expected_output": "完成上述步骤后，你应该能够：\n- 清晰解释Token与词的区别。\n- 举例说明一个词可能被拆分为多个Token。\n- 列举至少两个应用场景，其中理解Token概念是有用的。\n- 完成决策检查清单，并确认自己已掌握核心概念。",
+      "goal": "理解Token的基本概念及其在语言模型中的作用，并能够应用相关知识优化提示词设计",
+      "env_setup": "无需特殊环境，仅需具备基本文本处理概念。建议准备纸笔或文本编辑器用于记录和练习。",
+      "steps_markdown": "## 实操指南：理解Token并优化提示词\n\n### 步骤1：理解Token与词的区别\n- 阅读以下示例，感受Token化过程：\n  - 原句：\"I love playing football.\"\n  - 词级Token化：[\"I\", \"love\", \"playing\", \"football\", \".\"]\n  - 子词级Token化（BPE）：[\"I\", \"love\", \"play\", \"ing\", \"football\", \".\"]\n  - 字符级Token化：[\"I\", \" \", \"l\", \"o\", \"v\", \"e\", ...]\n- **关键点**：Token是模型处理的实际单位，可能比词更细（如\"playing\"拆成\"play\"+\"ing\"）或更粗（如\"New York\"可能作为一个Token）。\n\n### 步骤2：认识Token与词汇表的关系\n- 每个Token对应模型词汇表中的一个条目。当文本被Token化时，会转换为词汇表中的索引（token_ids）。\n- 如果某个词不在词汇表中，通常会被标记为[UNK]（未知词）。\n- **练习**：假设词汇表中有\"play\"和\"ing\"，但无\"playing\"，则\"playing\"会被拆分为\"play\"和\"ing\"两个Token，而不是[UNK]。\n\n### 步骤3：评估Token化对模型性能的影响\n- Token数量直接影响计算成本和上下文长度。\n- 更细粒度的Token化（如字符级）会增加Token数量，但可能提高表现力；更粗粒度（如词级）减少Token数量，但可能丢失细节。\n- **决策清单**：\n  - [ ] 我的提示词是否过长？是否可以通过精简表达减少Token数量？\n  - [ ] 我的输入是否包含生僻词？是否可能被标记为[UNK]？\n  - [ ] 我是否需要在有限的上下文长度内传递更多信息？\n\n### 步骤4：应用Token知识优化提示词\n- 根据上述理解，优化提示词以节省Token并提高准确性：\n  - 使用简洁明确的表达，避免冗余。\n  - 对于可能不在词汇表中的专业术语，考虑提供解释或使用常见同义词。\n  - 注意大小写和标点，因为它们可能产生额外Token。\n- **示例**：\n  - 原始：\"Please explain the concept of natural language processing in a detailed manner.\"\n  - 优化：\"Explain NLP concisely.\"\n\n### 步骤5：检查清单（用于评估是否理解）\n- [ ] 我能解释Token与词的区别吗？\n- [ ] 我知道Token与词汇表的关系吗？\n- [ ] 我能列举Token化策略（词级、子词级、字符级）吗？\n- [ ] 我能说明Token数量对模型性能的影响吗？\n- [ ] 我能应用这些知识优化一个提示词吗？\n\n### 附加说明（伪代码，仅帮助理解，无需手动运行）\n```\n# 伪代码：模拟Token化过程（仅帮助理解）\ndef tokenize(text, strategy):\n    if strategy == \"word\":\n        return text.split()\n    elif strategy == \"subword\":\n        # 简化BPE过程\n        tokens = []\n        for word in text.split():\n            if word in vocab:\n                tokens.append(word)\n            else:\n                # 拆分为子词\n                tokens.extend(break_word(word))\n        return tokens\n    elif strategy == \"char\":\n        return list(text)\n```",
+      "expected_output": "完成上述步骤后，您应能：\n1. 清晰描述Token与词的区别，并举例说明。\n2. 解释Token与词汇表的关系，以及[UNK]的含义。\n3. 评估不同Token化策略对模型性能的影响。\n4. 应用Token知识优化至少一个提示词，并说明优化理由。\n5. 完成检查清单中的所有项目。",
       "common_issues": [
-        "混淆Token与词的概念，认为Token一定是完整的单词。",
-        "忽略不同分词器可能产生不同Token序列，导致对Token数量的误判。",
-        "在应用场景中，未考虑Token化对成本或性能的影响。"
+        "混淆Token与词的概念，误以为一个Token总是一个完整的词。",
+        "忽略未知词的处理，导致输入被标记为[UNK]而影响输出质量。",
+        "未考虑Token数量对成本和上下文长度的影响，导致提示词过长或超出限制。",
+        "在优化提示词时，过度压缩信息导致语义丢失。"
       ]
     },
     "quiz": {
       "questions": [
         {
-          "question": "在LLM中，Token是什么？",
+          "question": "Token是语言模型处理文本的基本单位。以下关于Token的说法，哪一项是正确的？",
           "type": "选择",
           "options": [
-            "A. 自然语言中的完整单词",
-            "B. 文本被分词后的最小单元，可以是单词、子词或字符",
-            "C. 一个句子中的标点符号",
-            "D. 模型的输出结果"
+            "A. Token与语言学中的“词”是完全相同的概念。",
+            "B. Token是根据特定算法从文本中切分出来的，可能比词更细或更粗。",
+            "C. 一个Token只能对应一个完整的单词。",
+            "D. Token化过程中不会对文本进行任何特殊处理。"
           ],
           "answer": "B",
-          "explanation": "Token是模型处理文本的基本单位，通过分词器将文本切分成Token序列，可以是单词、子词或字符。",
+          "explanation": "Token是根据特定算法从文本中切分出来的，可能比词更细（如子词）或更粗（如短语），因此B正确。A错在Token与词不同；C错在Token可以是子词或字符；D错在Token化涉及特殊处理如未知词标记等。",
           "difficulty": "基础"
         },
         {
-          "question": "分词器的主要作用是什么？",
+          "question": "在Token化过程中，如果某个词不在模型的词汇表中，通常会如何处理？",
           "type": "选择",
           "options": [
-            "A. 将Token转换为词向量",
-            "B. 将文本切分成Token序列，以平衡词汇表大小和模型性能",
-            "C. 将文本翻译成另一种语言",
-            "D. 将文本压缩为更短的字符串"
+            "A. 直接忽略该词。",
+            "B. 将其标记为[UNK]（未知词）。",
+            "C. 将其拆分为更小的Token。",
+            "D. 报错并停止处理。"
           ],
           "answer": "B",
-          "explanation": "分词器（如BPE）将文本切分成Token，目的是平衡词汇表大小和模型性能，并处理未登录词。",
+          "explanation": "根据知识内容，如果某个词不在词汇表中，通常会被标记为[UNK]，即未知词。",
           "difficulty": "基础"
         },
         {
-          "question": "一个词是否可能被拆分成多个Token？",
-          "type": "判断",
-          "options": [
-            "A. 正确",
-            "B. 错误"
-          ],
-          "answer": "A",
-          "explanation": "例如，'unbelievable'可能被拆分为'un', 'believe', 和'able'三个Token，因此一个词可能被拆分成多个Token。",
-          "difficulty": "基础"
-        },
-        {
-          "question": "请用自己的话解释Token和词的区别，并举例说明。",
+          "question": "请用自己的话解释：为什么说Token与“词”是不同的？请结合Token化过程举例说明。",
           "type": "简答",
           "options": [],
-          "answer": "Token是模型处理文本的基本单位，可以是单词、子词或字符；词是自然语言中的语义单位，通常由空格或标点分隔。例如，'playing'可能被拆分为'play'和'ing'两个Token，但作为一个词，它表示一个完整的动作。",
-          "explanation": "此题考查对Token和词概念的理解，学生需用自己的话描述区别并举例。",
+          "answer": "Token是模型处理文本的实际单位，而“词”是语言学上的概念。Token化过程可能将一个词拆分为多个Token（如'playing'拆为'play'和'ing'），也可能将多个词合并为一个Token（如'New York'）。因此，Token的切分是基于算法和词汇表的，与语言学上的词不一定一致。",
+          "explanation": "考查对Token与词区别的理解，以及举例说明的能力。",
           "difficulty": "应用"
         },
         {
-          "question": "在中文文本中，分词器通常如何处理？",
-          "type": "选择",
+          "question": "考虑以下场景：某模型使用BPE（Byte Pair Encoding）进行Token化，词汇表大小为32000。现在输入一段文本，Token化后得到100个Token。如果改用词级Token化，词汇表大小为50000，则Token数量可能如何变化？请分析原因。",
+          "type": "简答",
+          "options": [],
+          "answer": "Token数量可能减少，因为词级Token化通常将每个词作为一个Token，而子词级（如BPE）可能会将一个词拆分为多个子词Token。但具体取决于文本中词的分布和词汇表覆盖情况。例如，如果文本中的词大多在词汇表中，词级Token化可能产生更少的Token；但若出现未登录词，则可能产生[UNK]或拆分为子词。",
+          "explanation": "考查对Token化策略影响Token数量的理解，以及分析能力。",
+          "difficulty": "综合"
+        },
+        {
+          "question": "判断题：Token的数量直接影响模型的计算成本和能够处理的最大上下文长度。",
+          "type": "判断",
           "options": [
-            "A. 与英文相同，按空格分词",
-            "B. 通常基于字进行分词",
-            "C. 按句子切分",
-            "D. 不处理中文"
+            "正确",
+            "错误"
           ],
-          "answer": "B",
-          "explanation": "中文通常使用基于字的分词方式，因为中文没有空格分隔词。",
-          "difficulty": "应用"
+          "answer": "正确",
+          "explanation": "知识内容明确指出：Token的数量直接影响到模型的计算成本和能够处理的最大上下文长度。",
+          "difficulty": "基础"
         }
       ]
     },
@@ -126,7 +129,15 @@
         "verification_status": "已验证"
       },
       {
-        "source": "Google GenAI Best Practices_gemma_docs_agile_classifiers.ipynb.md",
+        "source": "Google GenAI Best Practices_gemini-api_docs_model-tuning_rest.ipynb.md",
+        "verification_status": "已验证"
+      },
+      {
+        "source": "（知识库补全）",
+        "verification_status": "已验证"
+      },
+      {
+        "source": "（知识库补全）",
         "verification_status": "已验证"
       }
     ]

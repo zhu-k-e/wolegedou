@@ -1,9 +1,9 @@
 """LLM客户端 - OpenAI兼容接口，支持分层模型策略
 
 对应方案书 8.5 节分层模型配置：
-  - 中档(DeepSeek-V3)：候选生成/审核/资源生成
-  - 高档(GPT-4o)：聚焦输出/裁判团裁决
-  - 低档(GPT-4o-mini)：轻量判断
+  - 中档(deepseek-chat / DeepSeek-V3)：候选生成/审核/资源生成
+  - 高档(qwen-max)：聚焦输出/裁判团裁决
+  - 低档(qwen-turbo)：轻量判断
 """
 
 import asyncio
@@ -35,9 +35,9 @@ _DEFAULT_OUTPUT_CAP = 8192
 
 class ModelTier(str, Enum):
     """模型等级"""
-    MID = "mid"      # 中档：DeepSeek-V3
-    HIGH = "high"    # 高档：GPT-4o
-    LOW = "low"      # 低档：GPT-4o-mini
+    MID = "mid"      # 中档：deepseek-chat (DeepSeek-V3)
+    HIGH = "high"    # 高档：qwen-max
+    LOW = "low"      # 低档：qwen-turbo
 
 
 class LLMClient:
