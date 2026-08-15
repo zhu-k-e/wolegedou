@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated_at": "2026-08-15 17:39:15",
+    "generated_at": "2026-08-15 22:23:19",
     "source": "data/wolegedou.db: task_metrics/task_resources WHERE session_id LIKE 'bm_%'",
     "paired_with": "tests/test_cases_100.json (by normalized question)",
     "scope": "仅含 100 个基准评测用例，不含 demo/真实流量及任何学生私有运行态"
@@ -8,7 +8,7 @@
   "summary": {
     "benchmark_cases": 100,
     "coverage_rate_deterministic": 0.879,
-    "adaptation_self_eval_avg": 0.8513,
+    "teaching_fit_self_eval_avg": 0.8513,
     "knowledge_traceability_self_eval_avg": 0.8911,
     "force_pass_count": 15,
     "note": "覆盖率(coverage_rate_deterministic) 使用与 validate_metrics 完全一致的离线关键词命中逻辑，可由本文件 + tests/test_cases_100.json 独立复算。适配准确率/专业知识谬误率/幻觉率三项由硬化 LLM 裁判(MetricsLLMJudge, HIGH 档, 去纵容/全文+练习+测验)在跑分时刻计算，结果未持久化于数据库；本文件保留系统自评估字段作佐证。完整 4 指标与口径见 docs/metrics_validation_report.md 与 docs/metrics_summary.md。"

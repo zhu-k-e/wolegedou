@@ -100,7 +100,7 @@ KB_TEST_QUERIES = [
 class MetricsCalculator:
     """从数据库计算 4 项量化指标"""
 
-    def __init__(self, bm_only: bool = False, use_llm: bool = True):
+    def __init__(self, bm_only: bool = True, use_llm: bool = True):
         self.bm_only = bm_only
         self.use_llm = use_llm
         self._llm_judge_results: dict[str, dict] = {}
@@ -978,7 +978,7 @@ def generate_markdown_report(metrics: dict, kb_result: dict | None, targets: dic
 # 主入口
 # ============================================================
 
-def main(run_kb: bool = True, bm_only: bool = False, use_llm: bool = True):
+def main(run_kb: bool = True, bm_only: bool = True, use_llm: bool = True):
     logger.info("开始量化指标验证...")
 
     # 1. 从 DB 计算指标
@@ -1028,7 +1028,7 @@ def main(run_kb: bool = True, bm_only: bool = False, use_llm: bool = True):
 if __name__ == "__main__":
     args = sys.argv[1:]
     run_kb = True
-    bm_only = False
+    bm_only = True
     use_llm = "--no-llm" not in args
     if "--no-kb" in args:
         run_kb = False

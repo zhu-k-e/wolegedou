@@ -156,7 +156,7 @@ def main():
     summary = {
         "benchmark_cases": len(cases),
         "coverage_rate_deterministic": round(sum(cov_ratios) / len(cov_ratios), 4) if cov_ratios else None,
-        "adaptation_self_eval_avg": _avg([c["pedagogical_fit"] for c in cases]),
+        "teaching_fit_self_eval_avg": _avg([c["pedagogical_fit"] for c in cases]),
         "knowledge_traceability_self_eval_avg": _avg([c["verification_rate"] for c in cases]),
         "force_pass_count": sum(1 for c in cases if c["override_reason"] is not None),
         "note": (
@@ -180,7 +180,7 @@ def main():
     OUT_PATH.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已导出 {len(cases)} 条基准证据 -> {OUT_PATH}")
     print(f"确定性覆盖率(复算): {summary['coverage_rate_deterministic']}")
-    print(f"自评估适配均值: {summary['adaptation_self_eval_avg']} | 强制放行数: {summary['force_pass_count']}")
+    print(f"教学适配度自评均值: {summary['teaching_fit_self_eval_avg']} | 强制放行数: {summary['force_pass_count']}")
 
 
 if __name__ == "__main__":

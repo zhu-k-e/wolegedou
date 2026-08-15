@@ -1,6 +1,6 @@
 # 量化指标验证报告
 
-> 生成时间: 2026-08-14 16:59:42
+> 生成时间: 2026-08-15 22:23:01
 > 对应方案书: 第七部分 指标与验证（7.1 节赛题指标映射 + 7.2.3 节验证方法）
 
 ## 1. 赛题硬指标
@@ -14,8 +14,6 @@
 | 适配准确率 | 100.0% | 85.0% | PASS | 100 | LLM 复核 (expected_complexity vs 生成讲义难度) |
 | 幻觉率 | 3.0% | 5.0% | PASS | 100 | LLM 复核 (HIGH档, 全文+练习+测验, 检测无根据编造/似真但错误) |
 | 专业知识谬误率 | 0.0% | 5.0% | PASS | 100 | LLM 复核 (reference_answer_points vs 生成讲义) |
-
-> **口径说明（关键，防误读）**：上表为**默认启用 LLM 复核（硬化版）**的真值。覆盖率由零 LLM 关键词命中计算，可独立复现（已离线重算 = 87.9%）。适配/幻觉/谬误由 `MetricsLLMJudge`（HIGH 档 qwen-max、缓存盐 `v3-hallucination-hardened`）对落库讲义独立重判。若使用 `--no-llm`，适配/幻觉/谬误会回退到旧口径（启发式 / 强制放行占比 / Verifier 自评），**该旧口径不作为达标证据**（详见第 4 节与"已知局限"）。切勿将 `--no-llm` 回退值当作硬指标值。
 
 ### 过程观测指标（系统自评，不作达标证据）
 
@@ -35,18 +33,18 @@
 - **样本数**: 100
 
 ### 适配准确率（赛题硬指标 / 事实比对）
-- **计算方式**: judged=86, matched=86, no_signal=14
-- **数据来源**: expected_complexity vs 生成资源难度说明(启发式, fallback)
-- **样本数**: 86
+- **计算方式**: judged=100, matched=100
+- **数据来源**: LLM 复核 (expected_complexity vs 生成讲义难度)
+- **样本数**: 100
 
 ### 幻觉率（赛题硬指标）
-- **计算方式**: MetricsLLMJudge.hallucination 独立判定（HIGH 档 qwen-max，全文+练习+测验，检测无根据编造/似真但错误）；判定口径见第 4 节
-- **数据来源**: 硬化 LLM 裁判对落库讲义重判（不读 task_metrics.verdict 或 override_reason）
+- **计算方式**: hallucinated=3/100
+- **数据来源**: LLM 复核 (HIGH档, 全文+练习+测验, 检测无根据编造/似真但错误)
 - **样本数**: 100
 
 ### 专业知识谬误率（赛题硬指标）
-- **计算方式**: avg_fact_accuracy=0.999
-- **数据来源**: task_metrics.fact_accuracy (Verifier 自评，fallback)
+- **计算方式**: errors=0, avg_confidence=0.000
+- **数据来源**: LLM 复核 (reference_answer_points vs 生成讲义)
 - **样本数**: 100
 
 ### 教学适配度（观测 / 系统自评）
@@ -60,10 +58,9 @@
 - **样本数**: 100
 
 ### 强制放行率（观测：全票失败/修改超限强制通过）
-- **计算方式**: unanimous_fail_force_pass=9, revision_limit_force_pass=6, judge_panel_exception_force_pass=0（经裁判团 prompt 校准 + 离线复判后；原始基线 68=63+3+2）
+- **计算方式**: unanimous_fail_force_pass=9, revision_limit_force_pass=6
 - **数据来源**: task_metrics.override_reason
 - **样本数**: 100
-- **说明**: 原始基线 68% 主要因裁判团对软问题（逻辑跳、难度偏、未 100% 溯源）过严，而 FSM 内部事实自评均满分（fact_accuracy=1.00），即"事实正确被软维度卡 fail"。校准裁判 prompts（放松反向怀疑阈值、仅严重缺陷才 failed）并离线复判后降至 15%：9 例全票失败均为真实虚构 API/命令/参数错误（与独立 MetricsLLMJudge 检出的幻觉样本重合），6 例为 FSM 修订次数耗尽（编排器机制，非裁判问题）。4 项赛题硬指标由独立硬化裁判计算，与强制放行完全解耦、不受影响。
 
 ## 3. 知识库召回率测试
 

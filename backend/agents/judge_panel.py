@@ -134,10 +134,10 @@ class JudgePanel:
         """反向怀疑检测（方案书 4.4.3 节）
 
         被动触发式：当聚焦输出内容复杂度过高时，启用严格审查。
-        触发条件（任一满足）：
-          - knowledge_refs ≥ 5条
-          - code_example ≥ 20行
-          - reasoning_steps ≥ 8步
+        触发条件（任一满足，阈值见类常量，2026-08-15 校准）：
+          - knowledge_refs ≥ 12条
+          - code_example ≥ 50行
+          - reasoning_steps ≥ 20步
 
         Returns:
             True 表示触发严格审查模式

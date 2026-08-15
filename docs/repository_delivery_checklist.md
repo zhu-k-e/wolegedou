@@ -27,7 +27,7 @@
 | 12 | 测试 | 单元测试齐全可执行 | ✅ | `backend/tests/` 含 `test_knowledge_accuracy.py` 等；命令 `pytest backend/tests/ -v` |
 | 13 | 指标可复现 | 真测脚本齐备 | ✅ | `validate_metrics.py` + `benchmark_testcases.py` + `metrics_llm_judge.py`；清空缓存重判流程已验证可复现 |
 | 14 | 指标可复现 | 判定缓存不污染评审 | ❌→✅ **本轮已修复** | `backend/data/metrics_llm_judge_cache*.json` 已加入 `.gitignore`，评审 clone 后自行重判 |
-| 15 | 数据 | 学情 I/O 示例 | ✅ | `data/io_examples/` 3 组差异化样本（TC-001/006/088）+ README |
+| 15 | 数据 | 学情 I/O 示例 | ✅ | `data/io_examples/` 3 组差异化样本（TC-001/020/048）+ README |
 | 16 | 数据 | 知识库大数据（numpy_kb 30532 chunks / raw_docs / bge-m3 2.2GB） | ⚠️ | 已 `gitignore`（体积超限）；复现需从网盘下载，`KB_PROVENANCE.md` 已说明。**需确保网盘链接 9-5 前有效** |
 | 17 | 安全 | 密钥不入仓 | ✅ | `.env` 已 `gitignore`；`.idea/` 已忽略 |
 | 18 | 安全 | 运行时数据库不入仓 | ✅ | `data/*.db`、`backend/data/*.db*` 已忽略 |

@@ -436,7 +436,7 @@ LLM 输出可能格式不规范，系统通过三层兜底确保解析成功：
 - [x] 延伸闭环（降维 / 进阶 / 复检 / 追问）
 - [x] 候选自评估双低触发 RAG 增强
 - [x] 调度早停机制
-- [x] 知识库 RAG 适配器（`NumpyKnowledgeBase` 对接预计算向量数据，34154 chunks，10 分类）
+- [x] 知识库 RAG 适配器（`NumpyKnowledgeBase` 对接预计算向量数据，30532 chunks（过滤非中英文后实际载入；原始 34154），10 分类）
 - [x] 知识库后端自动选择（numpy 优先 / chroma 备选 / stub 降级）
 - [x] FastAPI 后端 + 5 个 API 路由 + WebSocket
 - [x] 单元测试（26 个，全部通过）
