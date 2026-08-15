@@ -126,8 +126,8 @@ wolegedou/
     ├── proposal.md                 # 方案书 v7.0 终版
     ├── proposal_techspec.md        # 技术规格书
     ├── metrics_validation_report.md # 量化指标验证报告（4 硬指标 + 运行日志自辩）
-    ├── repository_delivery_checklist.md # 仓库交付清单
-    ├── frontend_integration_guide.md    # 前端对接指南（API 契约）
+    ├── internal/repository_delivery_checklist.md # 仓库交付清单（内部）
+    ├── internal/frontend_integration_guide.md    # 前端对接指南（内部，API 契约）
     └── ...                         # 其他论证文档
 ```
 
@@ -473,7 +473,7 @@ LLM 输出可能格式不规范，系统通过三层兜底确保解析成功：
 
 按优先级：
 1. **知识库端到端验证** — 部署 bge-m3 并测试真实检索
-2. **前端对接** — 调 `POST /api/ask` + `WS /ws/{task_id}`（见 `docs/frontend_integration_guide.md`）
+2. **前端对接** — 调 `POST /api/ask` + `WS /ws/{task_id}`（见 `docs/internal/frontend_integration_guide.md`）
 3. **集成测试** — 模拟完整流程：提问→资源→答题→反馈
 4. **端到端压力测试** — 多并发场景下 FSM 状态机稳定性
 

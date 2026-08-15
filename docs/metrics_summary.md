@@ -102,7 +102,7 @@ python -m backend.scripts.validate_metrics
 |------|------|
 | `docs/metrics_validation_report.md` | 完整算式、日志自辩、召回率测试、验证方法 |
 | `docs/metrics_summary.md` | 本文件（面向评审的指标速览） |
-| `docs/repository_delivery_checklist.md` | 申报值与倒排时间表 |
+| `internal/repository_delivery_checklist.md` | 申报值与倒排时间表（内部） |
 | `backend/scripts/validate_metrics.py` | 指标测算主程序（含 `--no-llm` / `--bm-only`） |
 | `backend/scripts/metrics_llm_judge.py` | 硬化 LLM 判定（缓存盐 `v3-hallucination-hardened`） |
 | `data/io_examples/` | 3 组学情 I/O 示例（含真实覆盖率落库产物抽样） |

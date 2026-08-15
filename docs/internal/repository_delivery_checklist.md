@@ -23,7 +23,7 @@
 | 8 | 容器化 | 部署文档配套 | ✅ | `DEPLOYMENT.md`（含 OMP 说明、KB 挂载、构建运行命令） |
 | 9 | 文档 | 总体说明 `README.md` | ✅ | 含环境/安装/KB 部署/启动/测试/架构图 |
 | 10 | 文档 | 指标验证报告 | ✅ | `docs/metrics_validation_report.md`：4 硬指标 + 第 5 节「运行日志告警说明」自辩 |
-| 11 | 文档 | 前端对接指南（备查） | ✅ | `docs/frontend_integration_guide.md`（前端队友已完成，作 API 参考/评审备查，非必需） |
+| 11 | 文档 | 前端对接指南（备查） | ✅ | `frontend_integration_guide.md`（前端队友已完成，作 API 参考/评审备查，非必需） |
 | 12 | 测试 | 单元测试齐全可执行 | ✅ | `backend/tests/` 含 `test_knowledge_accuracy.py` 等；命令 `pytest backend/tests/ -v` |
 | 13 | 指标可复现 | 真测脚本齐备 | ✅ | `validate_metrics.py` + `benchmark_testcases.py` + `metrics_llm_judge.py`；清空缓存重判流程已验证可复现 |
 | 14 | 指标可复现 | 判定缓存不污染评审 | ❌→✅ **本轮已修复** | `backend/data/metrics_llm_judge_cache*.json` 已加入 `.gitignore`，评审 clone 后自行重判 |
