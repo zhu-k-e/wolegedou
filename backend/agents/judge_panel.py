@@ -46,9 +46,12 @@ class JudgeFact(BaseAgent):
             "1. 对每条knowledge_refs，去知识库检索验证\n"
             "2. 判断整体输出是否足以直接提供给学生\n"
             "   - 事实准确率≥90%且无未验证错误 → passed\n"
-            "   - 事实准确率≥90%但有轻微表述问题 → revise\n"
+            "   - 事实准确率≥90%但有轻微表述问题 → low_confidence_passed\n"
             "   - 事实准确率80%-90% → low_confidence_passed\n"
             "   - 否则 → failed\n\n"
+            "【判定尺度】failed 仅用于真实事实错误（与知识库明确矛盾、虚构不存在的概念/"
+            "API/论文、捏造数据）。引用格式不规整、少量未标注来源但不矛盾，不构成事实错误，"
+            "不应判 failed；此类软问题判 low_confidence_passed 即可。\n\n"
             "【反向怀疑】系统会自动检测输出复杂度并在触发时注入"
             "「严格审查模式」指令。收到该指令时，每条必须100%可溯源。\n\n"
             "输出JSON: {\"verdict\": \"passed/revise/low_confidence_passed/failed\", "
@@ -71,6 +74,11 @@ class JudgeLogic(BaseAgent):
             "1. 步骤之间有没有跳跃\n"
             "2. 有没有矛盾\n"
             "3. 结论是否由推理步骤支持\n\n"
+            "【判定尺度】仅当存在严重逻辑错误（自相矛盾、结论无任何步骤支撑、"
+            "关键步骤缺失导致无法理解）时才判 failed；推理步偶有跳跃、表述不精炼、"
+            "略有冗余，应判 passed 或 low_confidence_passed（内容可用即算通过），"
+            "不要仅因不够完美就判 failed 或 revise。事实性内容由事实审查裁判负责，"
+            "不要因疑似事实问题而判逻辑 failed。\n\n"
             "输出JSON: {\"verdict\": \"passed/revise/low_confidence_passed/failed\", "
             "\"confidence\": 0.0-1.0, \"issues\": []}"
         )
@@ -91,6 +99,9 @@ class JudgeApplicability(BaseAgent):
             "1. 难度是否匹配学生knowledge_level\n"
             "2. 是否考虑了学生background\n"
             "3. 是否朝着学生current_goal方向\n\n"
+            "【判定尺度】仅当输出与学生的知识水平/目标严重错配（如给入门者纯研究论文、"
+            "给进阶者纯科普、明显答非所问）时才判 failed；轻微难度偏差或风格差异"
+            "应判 passed 或 low_confidence_passed（内容可用即算通过），不要因主观偏好判 failed 或 revise。\n\n"
             "输出JSON: {\"verdict\": \"passed/revise/low_confidence_passed/failed\", "
             "\"confidence\": 0.0-1.0, \"issues\": []}"
         )
@@ -108,9 +119,11 @@ class JudgePanel:
     """
 
     # 反向怀疑触发阈值（方案书 4.4.3 节）
-    _RS_REFS_THRESHOLD = 5
-    _RS_CODE_LINES_THRESHOLD = 20
-    _RS_STEPS_THRESHOLD = 8
+    # 校准(2026-08-15): 原阈值过低(refs≥5 / code≥20行 / 步骤≥8)导致大量中等复杂度
+    # 输出误触严格模式并要求100%溯源, 过度降级为低置信放行。上调为仅在真正高复杂度时触发。
+    _RS_REFS_THRESHOLD = 12
+    _RS_CODE_LINES_THRESHOLD = 50
+    _RS_STEPS_THRESHOLD = 20
 
     def __init__(self, **kwargs):
         self.judge_fact = JudgeFact(**kwargs)
@@ -273,10 +286,12 @@ class JudgePanel:
         verified_count = sum(1 for t in traceability if t.verification_status == VerificationStatus.VERIFIED)
         overall_rate = verified_count / len(traceability) if traceability else 0.0
 
-        # 严格模式下，验证率未达100%则降级（方案书 4.4.3 节）
-        if strict_mode and overall_rate < 1.0 and verdict_value == Verdict.PASSED:
+        # 严格模式下，验证率过低才降级（方案书 4.4.3 节）
+        # 校准(2026-08-15): 原要求100%可溯源过于严苛(模型综合推理步本就无单一外部文档,
+        # 见 _annotate_traceability 行645注释), 放宽到<0.8才降级, 避免少量不可溯源推理步误降级。
+        if strict_mode and overall_rate < 0.8 and verdict_value == Verdict.PASSED:
             logger.info(
-                f"严格审查: 验证率{overall_rate:.0%}<100%, 降级为LOW_CONFIDENCE_PASSED"
+                f"严格审查: 验证率{overall_rate:.0%}<80%, 降级为LOW_CONFIDENCE_PASSED"
             )
             verdict_value = Verdict.LOW_CONFIDENCE_PASSED
 
@@ -295,6 +310,7 @@ class JudgePanel:
         focused: FocusedOutput,
         profile: StudentProfile,
         strict_mode: bool = False,
+        tier: ModelTier = ModelTier.HIGH,
     ) -> JudgeOpinion:
         """单个裁判独立审查
 
@@ -318,14 +334,14 @@ class JudgePanel:
             f"{strict_instruction}"
         )
 
-        raw = await judge.generate(user_prompt, tier=ModelTier.HIGH, temperature=0.0)
+        raw = await judge.generate(user_prompt, tier=tier, temperature=0.0)
         data = await judge.parse_json_safe(raw)
         if data is None:
             # 瞬时异常/空输出/截断导致解析失败：重试一次（仍用HIGH档），
             # 避免误判 failed → 0:3 → 强制放行。重试仍失败则降级为 revise（转回炉修复），
             # 而非直接 failed（revise 超限才会走正常强制流程，强制放行更可控）。
             logger.warning(f"裁判{judge.agent_name}输出解析失败，重试一次")
-            raw = await judge.generate(user_prompt, tier=ModelTier.HIGH, temperature=0.0)
+            raw = await judge.generate(user_prompt, tier=tier, temperature=0.0)
             data = await judge.parse_json_safe(raw)
         if data is None:
             data = {"verdict": "revise", "confidence": 0.3, "issues": ["（裁判输出解析失败，已转回炉）"]}
@@ -362,6 +378,7 @@ class JudgePanel:
         losing_candidate: Optional[CandidateOutput],
         losing_agent: Optional[DomainAgent],
         winning_agent: Optional[DomainAgent],
+        tier: ModelTier = ModelTier.HIGH,
     ) -> tuple[Verdict, DissentResolution]:
         """分歧解决（DISSENT_RESOLVE状态）
 
@@ -381,7 +398,7 @@ class JudgePanel:
         # === 第一层第二步：多数方回应（新增） ===
         # 多数方看到少数方证据后，必须回应：接受或反驳
         majority_response_str, majority_reasoning = await self._majority_response(
-            minority_evidence, focused
+            minority_evidence, focused, tier=tier
         )
 
         # 根据多数方回应判断
@@ -391,7 +408,7 @@ class JudgePanel:
         else:
             # 多数方反驳 → 僵持 → 裁判长裁决（新增）
             verdict = await self._chief_judge_arbitrate(
-                minority_evidence, majority_reasoning, focused
+                minority_evidence, majority_reasoning, focused, tier=tier
             )
 
         # === 第二层：候选Agent辩论（与第一层协同） ===
@@ -442,6 +459,7 @@ class JudgePanel:
         self,
         minority_evidence: list[str],
         focused: FocusedOutput,
+        tier: ModelTier = ModelTier.HIGH,
     ) -> tuple[str, list[str]]:
         """多数方回应：看到少数方证据后判断接受或反驳
 
@@ -462,7 +480,7 @@ class JudgePanel:
         )
 
         raw = await self.judge_logic.generate(
-            user_prompt, tier=ModelTier.HIGH, temperature=0.0
+            user_prompt, tier=tier, temperature=0.0
         )
         data = await self.judge_logic.parse_json_safe(raw)
         if data is None:
@@ -478,6 +496,7 @@ class JudgePanel:
         minority_evidence: list[str],
         majority_reasoning: list[str],
         focused: FocusedOutput,
+        tier: ModelTier = ModelTier.HIGH,
     ) -> Verdict:
         """裁判长（裁判1-事实审查）最终裁决
 
@@ -497,7 +516,7 @@ class JudgePanel:
         )
 
         raw = await self.judge_fact.generate(
-            user_prompt, tier=ModelTier.HIGH, temperature=0.0
+            user_prompt, tier=tier, temperature=0.0
         )
         data = await self.judge_fact.parse_json_safe(raw)
         if data is None:
@@ -519,6 +538,7 @@ class JudgePanel:
         focused: FocusedOutput,
         profile: StudentProfile,
         judges: list[JudgeOpinion],
+        tier: ModelTier = ModelTier.HIGH,
     ) -> tuple[Verdict, Optional[str]]:
         """全票失败终审（方案书4.4.2延伸：0:3状态机未定义的补充处理）
 
@@ -547,16 +567,19 @@ class JudgePanel:
             f"各裁判的问题证据：\n{issues_summary}\n\n"
             f"被审查的输出：\n{focused.model_dump_json(indent=2)}\n\n"
             f"学情画像：\n{profile.model_dump_json(indent=2)}\n\n"
-            f"请做最终评估：虽然3名裁判都不通过，这份输出是否达到了"
-            f"最低可接受标准（即不至于完全不能提供给学生）？\n"
-            f"- 达到最低标准（问题可接受/裁判过于严格）→ pass\n"
-            f"- 未达到最低标准（有严重事实错误/严重不适配）→ fail\n"
+            f"请做最终评估：除非该输出存在【严重事实错误】（与知识库明确矛盾、"
+            f"虚构不存在的概念/API/论文、捏造数据），否则应判定为达到最低可接受标准"
+            f"（即不至于完全不能提供给学生）——本系统追求'任何问题都须给出可用答复'。\n"
+            f"下列情况【不应】判为未达标：逻辑略有跳跃、难度略有偏差、溯源未达100%、"
+            f"表述不够精炼、风格与学生偏好不完全匹配等软问题。\n"
+            f"- 存在严重事实错误 → fail\n"
+            f"- 其余（含仅软问题）→ pass\n"
             f"输出JSON: {{\"final_verdict\": \"pass\"或\"fail\", "
             f"\"reasoning\": \"裁决理由\"}}"
         )
 
         raw = await self.judge_fact.generate(
-            user_prompt, tier=ModelTier.HIGH, temperature=0.0
+            user_prompt, tier=tier, temperature=0.0
         )
         data = await self.judge_fact.parse_json_safe(raw)
         if data is None:
