@@ -1,0 +1,29 @@
+# 基准评测 qwen-max 截断/欠费告警证据（裁剪片段）
+
+> 来源：本地重跑日志 `data/benchmark_clean_rerun.log`（北京时间 2026-08-14 01:10–03:47，
+> 100 基准用例，HIGH 档 = qwen-max）。完整日志 366KB，被 `.gitignore` 的 `*.log` 忽略、未入库；
+> 本文件为评审可查的裁剪证据。
+
+## 计数
+
+- qwen-max 输出截断告警（达到 max_tokens=8192 上限）：**46 次**
+  - 其中 3 次重试后仍截断、返回残缺内容交上层校验的：**38 次**
+- 账户欠费（Arrearage）告警：**1 次**（落在 self-heal 阶段）
+
+## 结论（落库完整性铁证）
+
+- 截断机制：`llm_client` 命中 8192 token 上限后翻倍重试，3 次仍超限返回残缺内容交上层 self-heal 补全；
+  落库前由校验层把关。**已验证 `task_resources.lecture` 100 条全部为完整合法 JSON（min=1703 / max=7985 / mean=3737 字符，
+  0 残片、0 占位符）**，即截断未污染任何落库讲义。
+- 1 次 Arrearage 发生在 self-heal 且讲义已先落库，对落库数据无影响。
+- 38 次截断分布于辅助性 HIGH 调用（段内评选 / 裁判 / self-heal / 聚焦输出 / 候选 / 资源包），
+  经逐条定位均不导致指标失真；4 项指标（覆盖率 87.9% / 适配 100% / 幻觉 3% / 谬误 0%）真实可提交。
+
+## 代表性样本
+
+```
+[33m[1mWARNING [0m | LLM输出被截断(达到max_tokens上限) [tier=high, model=qwen-max, max_tokens=8192, 实际长度=24154, model_cap=8192]; attempt=0/2
+[33m[1mWARNING [0m | LLM输出被截断(达到max_tokens上限) [tier=high, model=qwen-max, max_tokens=8192, 实际长度=34380, model_cap=8192]; attempt=0/2
+[31m[1mERROR   [0m | LLM输出在3次尝试后仍被截断(已封顶8192) [tier=high] —— 返回残缺内容交由上层校验
+[31m[1mERROR   [0m | LLM调用失败 [tier=high, model=qwen-max, attempt=0/2]: Error code: 400 - {'error': {'message': 'Access denied, please make sure your account is in good standing. For details, see: https://help.aliyun.com/zh/model-studio/error-code#overdue-payment', 'type': 'Arrearage', 'param': No ...(截断)
+```

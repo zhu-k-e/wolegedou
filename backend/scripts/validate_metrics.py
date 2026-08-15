@@ -61,7 +61,7 @@ TARGETS = {
     # —— 过程观测指标（系统自评，不作达标证据）——
     "adaptation_rate": {"target": 0.85, "compare": ">=", "label": "教学适配度(自评)", "unit": "%", "official": False},
     "coverage_rate":   {"target": 0.90, "compare": ">=", "label": "知识溯源率(自评)", "unit": "%", "official": False},
-    "force_pass_rate": {"target": 0.05, "compare": "<=", "label": "强制放行率",     "unit": "%", "official": False},
+    "force_pass_rate": {"target": 0.05, "compare": "<=", "label": "强制放行率(自评)", "unit": "%", "official": False},
 }
 
 # 报告展示顺序：赛题硬指标在前，过程观测指标在后
