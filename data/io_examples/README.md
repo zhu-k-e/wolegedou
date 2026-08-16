@@ -28,3 +28,14 @@
 - **最终资源（领域生成 Agent）**：含讲义、练习指南、分阶测验、知识引用（详见 JSON）。
 
 > 说明：示例 3 的 verdict=`low_confidence_passed` 为裁判团低置信通过（非强制放行，override_reason=null），其溯源率 0.8 低于示例 1/2 的 1.0，用于展示系统在置信度维度的真实分级，而非缺陷。
+
+## 引用标注口径与溯源说明
+
+`output_resources.knowledge_refs`（及讲义内 `knowledge_refs_display`）为系统生成资源所附参考文献，逐条标注 `verification_status`：
+
+- **`已验证`**：该引用在知识库（KB，共 432 篇真实文档）中**检索命中**对应文档。例如 `Google GenAI Best Practices_*.ipynb.md`、`microsoft_autogen_README.md`，均已与 KB `source_doc` 精确匹配。
+- **`未命中KB检索`**：模型生成的参考引用，**未在本项目 KB 中检索命中**。含两类：
+  - 真实外部文献（如 `ReAct: Synergizing Reasoning and Acting (Yao et al., 2022)`、`LangChain ReAct Agent 文档`）——其本身为真实存在的论文/框架，仅未收录进本项目 KB；
+  - 系统 KB 兜底补全条目（`（知识库补全）`）——对无法精准匹配单一 KB 文档的论断，由 KB 语料整体兜底生成，**而非凭空编造**。
+
+> **两套口径，请勿混淆**：`decision_mid` 中的 `verification_rate`（知识溯源率）与 `traceability_*`（溯源核验）由**裁判团语义判定**知识论断的可验证性，是本项目核心溯源证据；`knowledge_refs` 的 `已验证 / 未命中KB检索` 是**引用来源透明度标注**（是否逐条检索命中 KB 真实文档）。二者独立记录、均未掩饰或虚构。所有标记均经 `data/numpy_kb/metadatas.json` 的 `source_doc` 字段实测核对。

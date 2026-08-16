@@ -38,11 +38,11 @@
       "knowledge_refs_display": [
         {
           "source": "ReAct: Synergizing Reasoning and Acting in Language Models (Yao et al., 2022)",
-          "verification_status": "已验证"
+          "verification_status": "未命中KB检索"
         },
         {
           "source": "LangChain ReAct Agent 文档",
-          "verification_status": "已验证"
+          "verification_status": "未命中KB检索"
         }
       ]
     },
@@ -119,11 +119,11 @@
     "knowledge_refs": [
       {
         "source": "ReAct: Synergizing Reasoning and Acting in Language Models (Yao et al., 2022)",
-        "verification_status": "已验证"
+        "verification_status": "未命中KB检索"
       },
       {
         "source": "LangChain ReAct Agent 文档",
-        "verification_status": "已验证"
+        "verification_status": "未命中KB检索"
       }
     ]
   }

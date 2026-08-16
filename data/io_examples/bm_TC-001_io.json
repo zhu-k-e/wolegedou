@@ -46,11 +46,11 @@
         },
         {
           "source": "（知识库补全）",
-          "verification_status": "已验证"
+          "verification_status": "未命中KB检索"
         },
         {
           "source": "（知识库补全）",
-          "verification_status": "已验证"
+          "verification_status": "未命中KB检索"
         }
       ]
     },
@@ -134,11 +134,11 @@
       },
       {
         "source": "（知识库补全）",
-        "verification_status": "已验证"
+        "verification_status": "未命中KB检索"
       },
       {
         "source": "（知识库补全）",
-        "verification_status": "已验证"
+        "verification_status": "未命中KB检索"
       }
     ]
   }
