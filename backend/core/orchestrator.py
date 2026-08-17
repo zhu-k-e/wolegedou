@@ -1421,10 +1421,16 @@ class Orchestrator:
                 merged_steps.append(f"--- 段{i+1} ---")
                 merged_steps.extend(o.reasoning_steps)
 
-        # 合并知识引用（直接拼接）
+        # 合并知识引用（按 source+content_summary 去重，保留首次出现顺序）
+        _seen_refs: set[tuple[str, str]] = set()
         merged_refs = []
         for o in outputs:
-            merged_refs.extend(o.knowledge_refs)
+            for ref in o.knowledge_refs:
+                key = (ref.source, ref.content_summary)
+                if key in _seen_refs:
+                    continue
+                _seen_refs.add(key)
+                merged_refs.append(ref)
 
         # 合并适用条件（按段标注）
         conditions = [
