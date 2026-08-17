@@ -14,7 +14,7 @@ from backend.config import get_settings
 from backend.db.init_db import init_database
 from backend.services.rag.kb_manager import init_knowledge_base
 from backend.services.compliance import cleanup_expired
-from backend.api.routes import ask, status, feedback, quiz, ws, kb, report
+from backend.api.routes import ask, status, feedback, quiz, ws, kb, report, memory
 
 
 settings = get_settings()
@@ -101,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(quiz.router, prefix="/api", tags=["答题"])
     app.include_router(kb.router, prefix="/api", tags=["知识库"])
     app.include_router(report.router, prefix="/api", tags=["报告"])
+    app.include_router(memory.router, prefix="/api", tags=["贡献记忆"])
     app.include_router(ws.router, tags=["WebSocket"])
 
     @app.get("/")

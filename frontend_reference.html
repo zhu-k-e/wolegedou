@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>领域知识个性化生成系统 · 前端参考页</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --card:#ffffff; --ink:#1f2937; --muted:#6b7280;
+    --line:#e5e7eb; --accent:#4f46e5; --accent-soft:#eef2ff;
+    --sky:#0ea5e9; --green:#16a34a; --yellow:#f59e0b; --red:#ef4444;
+    --radius:14px; --shadow:0 1px 3px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    line-height:1.6;font-size:15px;}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px;}
+  header.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px;}
+  .brand{display:flex;align-items:center;gap:12px;}
+  .logo{width:40px;height:40px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--sky));
+    color:#fff;display:grid;place-items:center;font-weight:700;font-size:18px;}
+  h1{font-size:20px;margin:0}
+  .sub{color:var(--muted);font-size:13px;margin:2px 0 0}
+  .config{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:8px 12px;font-size:13px;box-shadow:var(--shadow)}
+  .config input{border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-size:13px;width:230px;outline:none}
+  .config label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--muted)}
+  section.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px 24px;margin-top:20px;}
+  section.card > h2{font-size:16px;margin:0 0 4px;display:flex;align-items:center;gap:9px}
+  section.card > h2 .num{width:24px;height:24px;border-radius:7px;background:var(--accent-soft);
+    color:var(--accent);display:grid;place-items:center;font-size:13px;font-weight:700}
+  .hint{color:var(--muted);font-size:13px;margin:0 0 16px}
+  /* 画像表单 */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font-size:13px;
+    cursor:pointer;user-select:none;transition:.15s}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  select,textarea,input[type=text]{width:100%;border:1px solid var(--line);border-radius:9px;
+    padding:10px 12px;font-size:14px;font-family:inherit;outline:none;background:#fff}
+  textarea{resize:vertical;min-height:64px}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:11px 20px;
+    font-size:14px;font-weight:600;cursor:pointer;transition:.15s}
+  .btn:hover{filter:brightness(1.05)}
+  .btn.ghost{background:#fff;color:var(--accent);border:1px solid var(--accent)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  /* 调度流水线 */
+  .pipeline{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 14px}
+  .step{flex:0 0 auto;min-width:118px;border:1px solid var(--line);border-radius:11px;padding:11px 13px;
+    background:#fff;transition:.2s;position:relative}
+  .step .nm{font-size:13px;font-weight:600}
+  .step .ag{font-size:11.5px;color:var(--muted);margin-top:3px;min-height:30px}
+  .step .dot{position:absolute;top:9px;right:10px;width:9px;height:9px;border-radius:50%;background:var(--line)}
+  .step.done{border-color:#bbf7d0;background:#f0fdf4}
+  .step.done .dot{background:var(--green)}
+  .step.active{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 3px rgba(79,70,229,.12)}
+  .step.active .dot{background:var(--accent);animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .wslog{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--muted);
+    background:#0f172a;color:#cbd5e1;border-radius:10px;padding:12px 14px;max-height:150px;overflow:auto;white-space:pre-wrap;margin-top:12px}
+  /* 资源 tabs */
+  .tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:16px}
+  .tab{padding:9px 16px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--muted);
+    border-bottom:2px solid transparent}
+  .tab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .panel{display:none}.panel.on{display:block}
+  .md{background:#fafafa;border:1px solid var(--line);border-radius:10px;padding:16px 18px;
+    white-space:pre-wrap;font-size:14px;max-height:420px;overflow:auto}
+  .md h3{margin:.4em 0 .2em;font-size:16px}.md h4{margin:.6em 0 .2em;font-size:14.5px;color:#374151}
+  .md ul{margin:.2em 0;padding-left:20px}.md blockquote{margin:.4em 0;padding-left:12px;
+    border-left:3px solid var(--accent);color:#475569;background:#f8fafc;border-radius:0 6px 6px 0}
+  .quiz-q{border:1px solid var(--line);border-radius:11px;padding:14px 16px;margin-bottom:14px}
+  .quiz-q .qt{font-weight:600;margin-bottom:10px}
+  .opt{display:block;padding:8px 12px;border:1px solid var(--line);border-radius:8px;margin:6px 0;cursor:pointer;font-size:14px}
+  .opt.sel{border-color:var(--accent);background:var(--accent-soft)}
+  .ref{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);
+    border:1px dashed var(--line);border-radius:8px;padding:7px 11px;margin-top:8px}
+  .badge{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600}
+  .b-ok{background:#dcfce7;color:#166534}.b-warn{background:#fef3c7;color:#92400e}.b-bad{background:#fee2e2;color:#991b1b}
+  /* 报告三组件 */
+  .heat{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .hcell{border-radius:11px;padding:13px 14px;color:#fff;position:relative}
+  .hcell.mastered{background:linear-gradient(135deg,#22c55e,#16a34a)}
+  .hcell.partial{background:linear-gradient(135deg,#fbbf24,#f59e0b)}
+  .hcell.blind{background:linear-gradient(135deg,#f87171,#ef4444)}
+  .hcell .hd{font-weight:700;font-size:14px}.hcell .ha{font-size:11.5px;opacity:.92;margin-top:3px}
+  .hcell .hi{position:absolute;top:11px;right:12px;font-size:11px;background:rgba(255,255,255,.25);padding:1px 7px;border-radius:999px}
+  .legend{display:flex;gap:16px;font-size:12.5px;color:var(--muted);margin:12px 0 4px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  svg{width:100%;height:auto;display:block}
+  .path{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 14px}
+  .pstage{flex:0 0 auto;width:150px;border:1px solid var(--line);border-radius:12px;padding:13px;background:#fff;position:relative}
+  .pstage.rec{border-color:var(--yellow);box-shadow:0 0 0 3px rgba(245,158,11,.14)}
+  .pstage .ps{font-size:11px;color:var(--muted)}.pstage .pt{font-weight:700;margin:4px 0}
+  .pstage .ph{font-size:12px;color:var(--muted)}
+  .pstage .star{position:absolute;top:10px;right:11px;color:var(--yellow);font-size:15px}
+  .st{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600;display:inline-block;margin-top:7px}
+  .st.mastered{background:#dcfce7;color:#166534}.st.partial{background:#fef3c7;color:#92400e}
+  .st.blind{background:#fee2e2;color:#991b1b}
+  .disclaimer{margin-top:16px;font-size:12px;color:var(--muted);background:#fffbeb;border:1px solid #fde68a;
+    border-radius:9px;padding:10px 13px}
+  .pill{display:inline-block;background:var(--accent-soft);color:var(--accent);font-size:12px;
+    padding:3px 10px;border-radius:999px;margin:2px 4px 2px 0}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .mt{margin-top:14px}.mb{margin-bottom:14px}
+  .empty{color:var(--muted);font-size:13px;padding:18px;text-align:center;border:1px dashed var(--line);border-radius:10px}
+  .pill.big{font-size:14px;font-weight:600;padding:6px 14px}
+  .row.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .mtab{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  .mtab th,.mtab td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .mtab th{color:var(--muted);font-weight:600;background:var(--bg-soft)}
+  .mtab td .sub{color:var(--muted);font-size:11px;margin-top:2px}
+  .mtab .ok{color:#16a34a;font-weight:600}.mtab .bad{color:#ef4444;font-weight:600}
+  .feed{list-style:none;padding:0;margin:0;max-height:180px;overflow:auto}
+  .feed li{font-size:12px;padding:6px 0;border-bottom:1px solid var(--line);color:#374151}
+  .feed li .t{color:var(--muted);margin-right:6px}
+  .feed li.muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">知</div>
+      <div><h1>领域知识个性化生成与多智能体协同系统</h1>
+      <div class="sub">前端交互参考页（XH-202630）· 纯静态 · 零依赖 · 可对照后端 API 直接落地</div></div>
+    </div>
+    <div class="config">
+      <label>后端地址</label>
+      <input id="apiBase" value="http://localhost:8000" />
+      <label><input type="checkbox" id="demoMode" checked /> 演示数据</label>
+    </div>
+  </header>
+
+  <!-- 1. 学情画像输入 -->
+  <section class="card">
+    <h2><span class="num">1</span>差异化学情画像输入</h2>
+    <p class="hint">赛题要求：从差异化学习者学情画像输入开始。支持「结构化表单」与「自然语言描述」两种入口（对应后端 StudentProfile / 学情诊断 Agent）。</p>
+    <div class="grid2">
+      <div class="field">
+        <label>知识水平</label>
+        <div class="chips" id="f-level">
+          <span class="chip on" data-v="入门">入门</span>
+          <span class="chip" data-v="中级">中级</span>
+          <span class="chip" data-v="进阶">进阶</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>学习背景</label>
+        <div class="chips" id="f-bg">
+          <span class="chip on" data-v="cs_student">计算机专业</span>
+          <span class="chip" data-v="理科_无编程">理科无编程</span>
+          <span class="chip" data-v="有Python基础">有Python基础</span>
+          <span class="chip" data-v="有ML基础">有ML基础</span>
+          <span class="chip" data-v="文科">文科</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>学习目标</label>
+        <select id="f-goal">
+          <option>深入理解原理</option><option>项目落地</option><option>考证应试</option><option>拓展视野</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>意向领域（domain_hint，可留空）</label>
+        <input type="text" id="f-domain" placeholder='如 ["LLM基础"]' />
+      </div>
+    </div>
+    <div class="field mt">
+      <label>或：自然语言描述（留空则走上方结构化表单；填写后后端学情诊断 Agent 自动建画像）</label>
+      <textarea id="f-nl" placeholder="例如：我是一个刚接触大模型的大学生，想搞懂 Token 到底是什么，最好能帮我做一个练习。"></textarea>
+    </div>
+    <div class="field mt">
+      <label>当前问题（必填）</label>
+      <textarea id="f-question" placeholder="例如：在大语言模型中，什么是 Token？它与“词”有什么区别？">在大语言模型中，什么是 Token？它与“词”有什么区别？</textarea>
+    </div>
+    <div class="row mt">
+      <button class="btn" id="btnAsk">▶ 提交并启动多智能体协同</button>
+      <span class="hint" style="margin:0">点击后走 POST /api/tasks → WS /api/ws/{task_id} → GET /api/status/{task_id}</span>
+    </div>
+  </section>
+
+  <!-- 2. 协同调度可视化 -->
+  <section class="card">
+    <h2><span class="num">2</span>多智能体协同调度与交互过程可视化</h2>
+    <p class="hint">赛题评分重点。下面 8 个阶段由后端 FSM 实时推送（WebSocket），每个阶段标注当前工作的 Agent。这是「调度可视化」的直接证据。</p>
+    <div class="pipeline" id="pipeline"></div>
+    <div class="wslog" id="wslog">// 等待提交…WebSocket 日志将实时滚动在此</div>
+  </section>
+
+  <!-- 3. 个性化资源 -->
+  <section class="card">
+    <h2><span class="num">3</span>个性化领域知识资源生成（≥3 种形态）</h2>
+    <p class="hint">讲义 / 实操指南 / 分阶测验 三种形态分 tab 展示（避免混成一堵文字墙）。数据来自 POST /api/ask 的 resource_package。</p>
+    <div class="tabs" id="resTabs">
+      <button class="tab on" data-t="lecture">📘 定制讲义</button>
+      <button class="tab" data-t="practice_guide">🛠 实操指南</button>
+      <button class="tab" data-t="quiz">📝 分阶测验</button>
+    </div>
+    <div class="panel on" id="p-lecture"></div>
+    <div class="panel" id="p-practice_guide"></div>
+    <div class="panel" id="p-quiz"></div>
+  </section>
+
+  <!-- 4. 学情诊断报告 -->
+  <section class="card">
+    <h2><span class="num">4</span>可视化个人学情与资源匹配度报告</h2>
+    <p class="hint">赛题硬性要求三组件（缺一不可）：① 知识盲区定位 ② 资源难度匹配曲线 ③ 学习路径规划图。数据来自 GET /api/report/{session_id}。</p>
+    <button class="btn ghost mb" id="btnReport">生成学情诊断报告</button>
+    <div id="reportBox"><div class="empty">尚未生成报告。提交问题后点击上方按钮。</div></div>
+  </section>
+
+  <!-- 5. 多智能体协同优化反馈（动态决策更新） -->
+  <section class="card">
+    <h2><span class="num">5</span>多智能体协同优化反馈 · 动态决策更新</h2>
+    <p class="hint">赛题完整性闭环最后一步：每次任务后系统记录各 Agent 贡献、EMA 更新表现分、动态调整 α、淘汰低表现 Agent。数据来自 GET /api/memory_stats。</p>
+    <button class="btn ghost mb" id="btnMemory">加载贡献记忆闭环</button>
+    <div id="memoryBox"><div class="empty">点击上方按钮（或生成报告后自动加载），查看系统如何通过贡献记忆「越用越聪明」。</div></div>
+  </section>
+
+  <div class="disclaimer" id="disclaimer"></div>
+</div>
+
+<script>
+/* ===================== 配置 ===================== */
+const $ = s => document.querySelector(s);
+const apiBase = () => $('#apiBase').value.trim().replace(/\/$/,'');
+const DEMO = () => $('#demoMode').checked;
+const SESSION = "demo-session-" + Date.now();
+
+/* ===================== FSM 阶段定义 ===================== */
+/* 后端编排器状态顺序（orchestrator.py）：PROFILING→DISPATCHING→GENERATING→
+   REVIEWING→FOCUSING→JUDGING→FORMATTING→COMPLETE。每个阶段标注负责的 Agent。 */
+const FSM = [
+  {key:'PROFILING',    name:'学情诊断',   ag:'学情诊断 Agent\n锚定理论强项 / 技能盲区'},
+  {key:'DISPATCHING',  name:'任务分发',   ag:'调度 Agent\n按领域路由专家'},
+  {key:'GENERATING',   name:'资源生成',   ag:'领域专家 Agent\n依托知识库生成内容'},
+  {key:'REVIEWING',    name:'交叉审核',   ag:'审核裁判 Agent\n溯源 / 事实核验'},
+  {key:'FOCUSING',     name:'聚焦深化',   ag:'领域专家 Agent\n降维 / 进阶迭代'},
+  {key:'JUDGING',      name:'裁判裁决',   ag:'裁判团\n置信度博弈'},
+  {key:'FORMATTING',   name:'格式化',     ag:'格式化 Agent\n排版输出'},
+  {key:'COMPLETE',     name:'完成',       ag:'✓ 闭环完成'},
+];
+function buildPipeline(){
+  $('#pipeline').innerHTML = FSM.map(s=>`
+    <div class="step" id="st-${s.key}">
+      <span class="dot"></span>
+      <div class="nm">${s.name}</div>
+      <div class="ag">${s.ag.replace(/\n/g,'<br>')}</div>
+    </div>`).join('');
+}
+function setStep(key,state){ // state: 'active' | 'done'
+  const el=$('#st-'+key); if(!el) return;
+  el.classList.remove('active');
+  if(state==='active') el.classList.add('active');
+  else if(state==='done'){el.classList.remove('active');el.classList.add('done');}
+}
+function logWs(msg){ $('#wslog').textContent += msg + '\n'; $('#wslog').scrollTop=$('#wslog').scrollHeight; }
+
+/* ===================== 演示数据（无后端时也能看完整效果） ===================== */
+const DEMO_RESOURCE = {
+  lecture:{
+    title:"Token：语言模型处理文本的基本单位",
+    content_markdown:"# Token：语言模型处理文本的基本单位\n\n## 1. 核心概念\n- **Token**：模型处理文本的最小单位，可以是单词、子词或字符。\n- **词汇表**：模型能识别的所有 Token 集合，每个 Token 有唯一索引。\n\n## 2. 工作原理\n> 模型无法直接理解文本，需转换为数字序列。Token 化是关键步骤。\n\n## 3. 切分策略\n- 词级：按空格切分\n- 子词级（BPE）：如 playing→play+ing\n- 字符级：单个字符",
+    difficulty_note:"入门级概念，但 Token 化细节可能较复杂，建议先掌握基础再深入。",
+    knowledge_refs_display:[
+      {source:"Google GenAI Best Practices_gemma_docs_*.ipynb.md",verification_status:"已验证"},
+      {source:"Google GenAI gemini-api_docs_model-tuning_rest.ipynb.md",verification_status:"已验证"},
+      {source:"（知识库补全）",verification_status:"未命中KB检索"}
+    ]
+  },
+  practice_guide:{
+    goal:"理解 Token 概念并应用到提示词优化",
+    env_setup:"无需特殊环境，准备纸笔或文本编辑器即可。",
+    steps_markdown:"## 实操步骤\n1. 用三种策略切分 'I love playing football.'\n2. 认识 Token 与词汇表的关系\n3. 评估 Token 数量对成本的影响\n4. 优化一条提示词",
+    expected_output:"能解释 Token 与词的区别，并优化至少一个提示词。",
+    common_issues:["混淆 Token 与词","忽略 [UNK] 处理","提示词过长超出上下文"]
+  },
+  quiz:{
+    questions:[
+      {question:"关于 Token，下列哪项正确？",type:"选择",options:["A.与“词”完全相同","B.按算法切分，可能更细或更粗","C.一个 Token 只能是一个词","D.不做特殊处理"],answer:"B",explanation:"Token 由算法切分，粒度与词不一定一致。",difficulty:"基础"},
+      {question:"词不在词汇表中通常被标记为？",type:"选择",options:["A.忽略","B.[UNK]","C.拆分","D.报错"],answer:"B",explanation:"未知词标记为 [UNK]。",difficulty:"基础"},
+      {question:"Token 数量影响什么？（简答）",type:"简答",options:[],answer:"计算成本与最大上下文长度。",explanation:"Token 越多计算越贵、上下文越受限。",difficulty:"应用"}
+    ]
+  }
+};
+const DEMO_REPORT = {
+  session_id:SESSION,
+  profile_summary:{knowledge_level:"ENTRY",domain_hint:["LLM基础"],domain_confidence:{LLM基础:"high"},test_results:[]},
+  knowledge_heatmap:{
+    blind_count:4,
+    summary:"还有 4 个领域盲区，建议优先补齐红色节点。",
+    nodes:[
+      {domain:"LLM基础",agent_name:"领域专家Agent",status:"mastered",importance_score:0.85,interacted:true},
+      {domain:"Prompt工程",agent_name:"领域专家Agent",status:"partial",importance_score:0.78,interacted:false},
+      {domain:"模型微调",agent_name:"领域专家Agent",status:"partial",importance_score:0.72,interacted:false},
+      {domain:"向量数据库",agent_name:"领域专家Agent",status:"blind",importance_score:0.65,interacted:false},
+      {domain:"RAG",agent_name:"领域专家Agent",status:"blind",importance_score:0.6,interacted:false},
+      {domain:"LangChain",agent_name:"领域专家Agent",status:"blind",importance_score:0.58,interacted:false},
+      {domain:"Agent框架",agent_name:"领域专家Agent",status:"blind",importance_score:0.55,interacted:false},
+      {domain:"项目部署",agent_name:"领域专家Agent",status:"blind",importance_score:0.5,interacted:false}
+    ]
+  },
+  difficulty_match:{
+    overall_match_rate:0.85,
+    points:[
+      {domain:"LLM基础",student_level:0.8,resource_difficulty:0.25,match_status:"matched"},
+      {domain:"Prompt工程",student_level:0.4,resource_difficulty:0.5,match_status:"too_hard"},
+      {domain:"模型微调",student_level:0.4,resource_difficulty:0.5,match_status:"too_hard"},
+      {domain:"向量数据库",student_level:0.25,resource_difficulty:0.25,match_status:"matched"}
+    ]
+  },
+  learning_path:{
+    stages:[
+      {stage:1,title:"基础概念",domains:["LLM基础"],estimated_hours:4,student_status:"mastered",recommended:false},
+      {stage:2,title:"Prompt工程",domains:["Prompt工程"],estimated_hours:3,student_status:"partial",recommended:true},
+      {stage:3,title:"模型调用与微调",domains:["HuggingFace","模型微调"],estimated_hours:6,student_status:"partial",recommended:true},
+      {stage:4,title:"向量检索",domains:["向量数据库"],estimated_hours:3,student_status:"blind",recommended:true},
+      {stage:5,title:"RAG架构",domains:["RAG","LangChain"],estimated_hours:5,student_status:"blind",recommended:true},
+      {stage:6,title:"Agent框架",domains:["Agent框架"],estimated_hours:4,student_status:"blind",recommended:true},
+      {stage:7,title:"项目实战",domains:["项目部署"],estimated_hours:6,student_status:"blind",recommended:true}
+    ]
+  }
+};
+
+/* ===================== 极简 Markdown 渲染 ===================== */
+function renderMd(t){
+  return t.split('\n').map(line=>{
+    if(line.startsWith('## ')) return `<h3>${esc(line.slice(3))}</h3>`;
+    if(line.startsWith('# ')) return `<h3>${esc(line.slice(2))}</h3>`;
+    if(line.startsWith('> ')) return `<blockquote>${esc(line.slice(2))}</blockquote>`;
+    if(line.startsWith('- ')) return `<ul><li>${esc(line.slice(2))}</li></ul>`;
+    if(line.trim()==='') return '';
+    return `<div>${esc(line)}</div>`;
+  }).join('').replace(/<\/ul><ul>/g,'');
+}
+const esc = s => s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* ===================== 资源渲染 ===================== */
+function renderResources(pkg){
+  const lec = pkg.lecture||{}, gui = pkg.practice_guide||{}, qz = pkg.quiz||{};
+  // 讲义
+  let refs = (lec.knowledge_refs_display||[]).map(r=>{
+    const b = r.verification_status==='已验证'?'b-ok':(r.verification_status==='未命中KB检索'?'b-warn':'b-bad');
+    return `<div class="ref">📎 ${esc(r.source)} <span class="badge ${b}">${esc(r.verification_status)}</span></div>`;
+  }).join('');
+  $('#p-lecture').innerHTML = `
+    <h3 style="margin:.2em 0">${esc(lec.title||'')}</h3>
+    <div class="md">${renderMd(lec.content_markdown||'（无内容）')}</div>
+    ${lec.difficulty_note?`<div class="ref" style="border-style:solid">💡 难度说明：${esc(lec.difficulty_note)}</div>`:''}
+    ${refs}`;
+  // 实操指南
+  $('#p-practice_guide').innerHTML = `
+    <div class="md">
+      <h3>目标</h3>${esc(gui.goal||'')}
+      <h3>环境准备</h3>${esc(gui.env_setup||'')}
+      <h3>步骤</h3>${renderMd(gui.steps_markdown||'')}
+      <h3>预期产出</h3>${esc(gui.expected_output||'')}
+      <h3>常见误区</h3>${(gui.common_issues||[]).map(i=>'• '+esc(i)).join('<br>')}
+    </div>`;
+  // 测验
+  const qs = qz.questions||[];
+  $('#p-quiz').innerHTML = qs.map((q,i)=>`
+    <div class="quiz-q" data-i="${i}" data-ans="${esc(q.answer||'')}">
+      <div class="qt">${i+1}. ${esc(q.question)} <span class="pill">${esc(q.difficulty||'')}</span></div>
+      ${(q.options&&q.options.length?q.options:['（简答/判断题）']).map(o=>`
+        <div class="opt" data-o="${esc(o)}">${esc(o)}</div>`).join('')}
+      <div class="ref" style="border-style:solid;display:none" data-exp>✅ 解析：${esc(q.explanation||'')}<br>参考答案：${esc(q.answer||'')}</div>
+    </div>`).join('') +
+    `<button class="btn mt" id="btnQuiz">提交测验（触发动态迭代）</button>`;
+  // 选项点击
+  $('#p-quiz').querySelectorAll('.quiz-q').forEach(q=>{
+    q.querySelectorAll('.opt').forEach(o=>o.onclick=()=>{
+      q.querySelectorAll('.opt').forEach(x=>x.classList.remove('sel'));
+      o.classList.add('sel');
+    });
+  });
+  $('#btnQuiz').onclick = submitQuiz;
+}
+
+/* ===================== 报告渲染 ===================== */
+function statusMeta(s){return {mastered:['已掌握','mastered'],partial:['部分掌握','partial'],blind:['盲区','blind']}[s]||['—','partial'];}
+function renderReport(r){
+  const hm=r.knowledge_heatmap, dm=r.difficulty_match, lp=r.learning_path;
+  // 热力图
+  const heat = hm.nodes.map(n=>{
+    const [,cls]=statusMeta(n.status);
+    return `<div class="hcell ${cls}"><span class="hi">重要度 ${n.importance_score}</span>
+      <div class="hd">${esc(n.domain)}</div><div class="ha">${esc(n.agent_name)}</div></div>`;
+  }).join('');
+  // 匹配曲线（SVG）
+  const pts=dm.points, W=720,H=240,pad=40;
+  const xs=i=>pad+(W-2*pad)*(i/(Math.max(pts.length-1,1)));
+  const ys=v=>H-pad-(H-2*pad)*v;
+  const line=(key,color)=>`<polyline fill="none" stroke="${color}" stroke-width="3" points="${pts.map((p,i)=>`${xs(i)},${ys(p[key])}`).join(' ')}"/>`+
+    pts.map((p,i)=>`<circle cx="${xs(i)}" cy="${ys(p[key])}" r="5" fill="${color}"/>`).join('')+
+    pts.map((p,i)=>`<text x="${xs(i)}" y="${H-pad+18}" font-size="11" fill="#6b7280" text-anchor="middle">${esc(p.domain)}</text>`).join('');
+  const svg=`<svg viewBox="0 0 ${W} ${H}">
+    <line x1="${pad}" y1="${H-pad}" x2="${W-pad}" y2="${H-pad}" stroke="#e5e7eb"/>
+    <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${H-pad}" stroke="#e5e7eb"/>
+    ${line('student_level','#0ea5e9')}${line('resource_difficulty','#ef4444')}
+    <text x="${pad}" y="20" font-size="12" fill="#0ea5e9">— 学生掌握水平</text>
+    <text x="180" y="20" font-size="12" fill="#ef4444">— 资源难度</text>
+  </svg>`;
+  // 路径
+  const path=lp.stages.map(s=>{
+    const [txt,cls]=statusMeta(s.student_status);
+    return `<div class="pstage ${s.recommended?'rec':''}">
+      ${s.recommended?'<span class="star">★</span>':''}
+      <div class="ps">阶段 ${s.stage} · ${s.estimated_hours}h</div>
+      <div class="pt">${esc(s.title)}</div>
+      <div class="ph">${s.domains.join(' / ')}</div>
+      <span class="st ${cls}">${txt}</span></div>`;
+  }).join('');
+  $('#reportBox').innerHTML = `
+    <div class="row mb"><span class="pill">盲区数 ${hm.blind_count}</span>
+      <span class="pill">整体匹配率 ${(dm.overall_match_rate*100).toFixed(0)}%</span>
+      <span class="pill">知识水平 ${esc(r.profile_summary.knowledge_level||'—')}</span>
+      <span class="pill">test_results：${(r.profile_summary.test_results||[]).length?JSON.stringify(r.profile_summary.test_results):'空（前端做空态展示）'}</span></div>
+    <h3 style="font-size:14px">① 知识盲区定位</h3>
+    <div class="heat">${heat}</div>
+    <div class="legend"><span><i style="background:#16a34a"></i>已掌握</span><span><i style="background:#f59e0b"></i>部分掌握</span><span><i style="background:#ef4444"></i>盲区</span></div>
+    <p class="hint" style="margin-top:6px">${esc(hm.summary)}</p>
+    <h3 style="font-size:14px;margin-top:18px">② 资源难度匹配曲线</h3>
+    ${svg}
+    <div class="legend"><span><i style="background:#0ea5e9"></i>学生掌握</span><span><i style="background:#ef4444"></i>资源难度</span><span>偏差&lt;0.2 视为匹配良好</span></div>
+    <h3 style="font-size:14px;margin-top:18px">③ 学习路径规划图</h3>
+    <div class="path">${path}</div>`;
+}
+
+/* ===================== 5. 贡献记忆闭环（动态决策更新） ===================== */
+const DEMO_MEMORY = {
+  alpha: 0.3,
+  agent_count: 45,
+  agents: [
+    {agent_id:'agent_001', agent_name:'LLM基础Agent', function_tag:'LLM原理与概念', accuracy:0.8835, count:262, rework_rate:0.0008, importance_score:0.9415, is_suspended:false},
+    {agent_id:'agent_009', agent_name:'项目实战Agent', function_tag:'项目架构与落地', accuracy:0.8245, count:90, rework_rate:0.0895, importance_score:0.8654, is_suspended:false},
+    {agent_id:'agent_005', agent_name:'RAG架构Agent', function_tag:'RAG与检索', accuracy:0.8612, count:150, rework_rate:0.021, importance_score:0.9021, is_suspended:false}
+  ],
+  recent_contributions: [
+    {task_id:'task_1962d568c305', agent_id:'agent_001', function_tag:'LLM原理与概念', review_score:0.8833, importance_score:0.9415, referee_verdict:'passed', created_at:'2026-08-16 11:29:26'},
+    {task_id:'task_1962d568c306', agent_id:'agent_009', function_tag:'项目架构与落地', review_score:0.814, importance_score:0.8654, referee_verdict:'revise', created_at:'2026-08-16 11:30:10'}
+  ],
+  eliminations: [
+    {agent_id:'agent_020', function_tag:'冷门领域', reason:'连续N次 importance_score 低于淘汰阈值', created_at:'2026-08-15'}
+  ]
+};
+const VERDICT_CN = {passed:'通过', revise:'修改通过', low_confidence_passed:'低置信度通过', failed:'未通过'};
+function renderMemory(m){
+  const rows = m.agents.map(a=>`<tr>
+    <td>${esc(a.agent_name)}<div class="sub">${esc(a.function_tag)}</div></td>
+    <td><b>${(a.importance_score*100).toFixed(1)}</b></td>
+    <td>${(a.accuracy*100).toFixed(1)}%</td>
+    <td>${a.count}</td>
+    <td>${a.is_suspended?'<span class="bad">已暂停</span>':'<span class="ok">活跃</span>'}</td>
+  </tr>`).join('');
+  const feed = m.recent_contributions.map(c=>`<li><span class="t">${esc(c.created_at)}</span> · ${esc(c.agent_id)} · ${esc(VERDICT_CN[c.referee_verdict]||c.referee_verdict)} · 评分 ${(c.review_score*100).toFixed(0)}</li>`).join('');
+  const elim = m.eliminations.length
+    ? m.eliminations.map(e=>`<li>${esc(e.agent_id)}（${esc(e.function_tag||'—')}）— ${esc(e.reason)}</li>`).join('')
+    : '<li class="muted">暂无淘汰记录</li>';
+  $('#memoryBox').innerHTML = `
+    <div class="row mb">
+      <span class="pill big">当前调度权重 α = ${m.alpha}</span>
+      <span class="pill">参与 Agent ${m.agent_count} 个</span>
+    </div>
+    <p class="hint">α 值冷启动 0.9，随数据积累阶梯式自动下降至 0.3——系统越用越稳，调度越聚焦高贡献 Agent。</p>
+    <h3 style="font-size:14px">Agent 贡献分排行（越用越聪明）</h3>
+    <table class="mtab"><thead><tr><th>Agent</th><th>贡献分</th><th>准确率</th><th>参与</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="row two">
+      <div><h3 style="font-size:14px;margin-top:14px">最近贡献流</h3><ul class="feed">${feed}</ul></div>
+      <div><h3 style="font-size:14px;margin-top:14px">淘汰记录</h3><ul class="feed">${elim}</ul></div>
+    </div>`;
+}
+async function loadMemory(){
+  if(DEMO()){renderMemory(DEMO_MEMORY);return;}
+  const m=await api('/api/memory_stats');
+  if(m&&m.agents)renderMemory(m);
+  else alert('获取贡献记忆失败');
+}
+
+/* ===================== 真实后端对接 ===================== */
+async function api(path,opt){return fetch(apiBase()+path,opt).then(r=>r.json());}
+async function connectWS(taskId){
+  const ws=new WebSocket((apiBase().replace('http','ws'))+'/api/ws/'+taskId);
+  ws.onmessage=ev=>{
+    let m;try{m=JSON.parse(ev.data)}catch{return}
+    logWs(`[${m.type}] state=${m.state}`);
+    const idx=FSM.findIndex(s=>s.key===m.state);
+    if(idx>=0){FSM.forEach((s,i)=>{if(i<idx)setStep(s.key,'done');});
+      if(m.state!=='COMPLETE')setStep(m.state,'active'); else setStep('COMPLETE','done');}
+  };
+  ws.onerror=()=>logWs('WebSocket 连接失败（检查后端地址 / CORS）');
+  return ws;
+}
+async function submitQuestion(){
+  const q=$('#f-question').value.trim();
+  if(!q){alert('请填写当前问题');return;}
+  const profile={
+    knowledge_level:$('#f-level .chip.on').dataset.v,
+    background:$('#f-bg .chip.on').dataset.v,
+    current_goal:$('#f-goal').value,
+    domain_hint:$('#f-domain').value?JSON.parse($('#f-domain').value):[]
+  };
+  $('#btnAsk').disabled=true; buildPipeline(); logWs('// 提交任务…');
+  try{
+    if(DEMO()){
+      // 演示：模拟流水线推进
+      for(const s of FSM){setStep(s.key,'active');logWs('[fsm_state] '+s.key);await sleep(350);setStep(s.key,'done');}
+      renderResources(DEMO_RESOURCE);
+      $('#disclaimer').textContent='⚠️ 以上内容由 AI 生成，仅供参考，请以官方文档与权威资料为准。（演示模式）';
+    }else{
+      const t=await api('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({question:q,session_id:SESSION,profile})});
+      logWs('任务已提交 task_id='+t.task_id);
+      const ws=await connectWS(t.task_id);
+      // 轮询直到完成
+      let res=null;
+      for(let i=0;i<60;i++){
+        await sleep(1000);
+        const st=await api('/api/status/'+t.task_id);
+        if(st.state==='COMPLETE'&&st.result){res=st.result;break;}
+      }
+      ws.close();
+      if(res&&res.resource_package)renderResources(res.resource_package);
+      $('#disclaimer').textContent=res?.disclaimer||'';
+    }
+  }catch(e){logWs('错误：'+e.message);}
+  $('#btnAsk').disabled=false;
+}
+async function submitQuiz(){
+  // 收集作答 → 调用 /api/quiz_submit → 动态迭代（降维/进阶/复检）
+  const qs=[...document.querySelectorAll('#p-quiz .quiz-q')];
+  const answers=qs.map(q=>{
+    const sel=q.querySelector('.opt.sel');const correct=q.dataset.ans;
+    const ua=sel?sel.dataset.o:'';
+    q.querySelector('[data-exp]').style.display='block';
+    return {question:q.querySelector('.qt').textContent,user_answer:ua,is_correct:!sel||ua.startsWith(correct)};
+  });
+  const correct=answers.filter(a=>a.is_correct).length, total=answers.length;
+  if(DEMO()){
+    const acc=correct/total;
+    const action=acc>=0.8?'advance':(acc===0?'redimension':'recheck');
+    const tip={redimension:'正确率偏低 → 多智能体决定对知识点「降维解释」',advance:'正确率高 → 生成「进阶挑战任务」',recheck:'部分正确 → 建议「复检」薄弱点'}[action];
+    alert(`测验完成：答对 ${correct}/${total}\n${tip}\n（真实模式下后端返回 accuracy + action + new_resources）`);
+    return;
+  }
+  const taskId = window.__lastTaskId || 'demo';
+  const r=await api('/api/quiz_submit',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({task_id:taskId,session_id:SESSION,answers})});
+  alert(`正确率 ${(r.accuracy*100).toFixed(0)}% · 动作：${r.action}\n${r.advance_question?('进阶题：'+r.advance_question.question):''}`);
+  if(r.new_resources)renderResources(r.new_resources);
+}
+async function genReport(){
+  if(DEMO()){renderReport(DEMO_REPORT);return;}
+  const r=await api('/api/report/'+SESSION);
+  if(r&&r.knowledge_heatmap)renderReport(r);
+  else {alert('未找到该会话画像，请先提交问题生成画像。');return;}
+  await loadMemory();
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* ===================== 事件绑定 ===================== */
+document.querySelectorAll('#f-level .chip,#f-bg .chip').forEach(c=>c.onclick=()=>{
+  c.parentElement.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));c.classList.add('on');});
+document.querySelectorAll('#resTabs .tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('#resTabs .tab').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  t.classList.add('on');$('#p-'+t.dataset.t).classList.add('on');});
+$('#btnAsk').onclick=submitQuestion;
+$('#btnReport').onclick=genReport;
+$('#btnMemory').onclick=loadMemory;
+buildPipeline();
+</script>
+</body>
+</html>

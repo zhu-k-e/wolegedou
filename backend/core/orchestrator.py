@@ -321,6 +321,11 @@ class Orchestrator:
             "question_type", "complexity_estimate", "intent_type",
         }
         if _CORE_FIELDS.issubset(pp.fields.keys()):
+            # 若画像已给出 domain_hint 但未提交 domain_confidence，
+            # 按 domain_hint 自动给 HIGH，避免完整画像因缺 confidence 误触发澄清。
+            domain_confidence = profile.get("domain_confidence") or {}
+            if not domain_confidence and pp.domain_hint:
+                domain_confidence = {h: ConfidenceLevel.HIGH for h in pp.domain_hint}
             return StudentProfile(
                 knowledge_level=pp.fields["knowledge_level"],
                 background=pp.fields["background"],
@@ -329,6 +334,7 @@ class Orchestrator:
                 domain_hint=pp.domain_hint,
                 complexity_estimate=pp.fields["complexity_estimate"],
                 intent_type=pp.fields["intent_type"],
+                domain_confidence=domain_confidence,
                 test_results=pp.test_results,
             )
         return pp
