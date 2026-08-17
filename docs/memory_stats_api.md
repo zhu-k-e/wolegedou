@@ -23,7 +23,8 @@ GET /api/memory_stats
 | 字段 | 类型 | 含义 |
 |------|------|------|
 | `alpha` | float | 当前调度遴选权重 α（冷启动 0.9 → 数据积累后阶梯降至 0.3）。演示环境当前为 `0.3` |
-| `agent_count` | int | 参与过任务的 Agent(function_tag) 总数 |
+| `agent_count` | int | 去重后的独立 Agent 数（系统真实定义的 11 个领域 Agent：agent_001~011） |
+| `capability_count` | int | 能力维度总数（每个 Agent 按 function_tag 拆出的能力标签数，即 `agent_performance` 表行数，演示环境为 45） |
 | `agents[]` | list | 各 Agent 表现明细，按 `importance_score` 降序 |
 | `agents[].agent_id` | str | Agent ID |
 | `agents[].agent_name` | str | Agent 名称（如「LLM基础Agent」） |
@@ -52,7 +53,8 @@ GET /api/memory_stats
 ```json
 {
   "alpha": 0.3,
-  "agent_count": 45,
+  "agent_count": 11,
+  "capability_count": 45,
   "agents": [
     {
       "agent_id": "agent_001",

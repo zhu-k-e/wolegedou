@@ -434,7 +434,8 @@ function renderReport(r){
 /* ===================== 5. 贡献记忆闭环（动态决策更新） ===================== */
 const DEMO_MEMORY = {
   alpha: 0.3,
-  agent_count: 45,
+  agent_count: 11,
+  capability_count: 45,
   agents: [
     {agent_id:'agent_001', agent_name:'LLM基础Agent', function_tag:'LLM原理与概念', accuracy:0.8835, count:262, rework_rate:0.0008, importance_score:0.9415, is_suspended:false},
     {agent_id:'agent_009', agent_name:'项目实战Agent', function_tag:'项目架构与落地', accuracy:0.8245, count:90, rework_rate:0.0895, importance_score:0.8654, is_suspended:false},
@@ -464,7 +465,8 @@ function renderMemory(m){
   $('#memoryBox').innerHTML = `
     <div class="row mb">
       <span class="pill big">当前调度权重 α = ${m.alpha}</span>
-      <span class="pill">参与 Agent ${m.agent_count} 个</span>
+      <span class="pill">领域 Agent ${m.agent_count} 个</span>
+      <span class="pill">覆盖能力维度 ${m.capability_count} 个</span>
     </div>
     <p class="hint">α 值冷启动 0.9，随数据积累阶梯式自动下降至 0.3——系统越用越稳，调度越聚焦高贡献 Agent。</p>
     <h3 style="font-size:14px">Agent 贡献分排行（越用越聪明）</h3>

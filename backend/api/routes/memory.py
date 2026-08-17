@@ -61,9 +61,14 @@ async def get_memory_stats() -> dict:
     )
     eliminations = [dict(r) for r in elim]
 
+    # agent_count = 去重 Agent 数（系统真实定义的 11 个领域 Agent）
+    # capability_count = 能力维度总数（每个 Agent 按 function_tag 拆出的 45 个能力标签）
+    # 注意：agent_performance 按 (agent_id, function_tag) 存一行，故 len(agents)=45 ≠ 独立 Agent 数
+    agent_ids = {a["agent_id"] for a in agents}
     return {
         "alpha": alpha,
-        "agent_count": len(agents),
+        "agent_count": len(agent_ids),
+        "capability_count": len(agents),
         "agents": agents,
         "recent_contributions": recent_contributions,
         "eliminations": eliminations,
