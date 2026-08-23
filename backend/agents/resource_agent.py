@@ -211,14 +211,29 @@ class ResourceAgent(BaseAgent):
     ) -> list[KnowledgeRefDisplay]:
         """构建知识引用展示，调 KB verify_statement 获取真实核查结果
 
+        去重：按 (source, content_summary) 权威去重，保留首次出现、顺序稳定。
+        orchestrator 仅在「多段聚焦合并」时去重，单段答案的 refs 会原样透传，
+        故此处做展示层兜底，确保返回给前端的引用列表不再出现重复条目，
+        所有前端（含队友真实前端）直接 1:1 渲染即可，无需各写一遍去重。
+
         用 content_summary 作为 statement 去核查（它是实际的知识陈述），
         回填真实的 verification_status（已验证/待验证/矛盾）和 source（知识库 chunk 来源）。
 
         对应方案书 6.6 节裁判团溯源标注：展示给学生的引用必须可溯源。
         KB 不可用或核查异常时降级为"待验证"，不影响主流程。
         """
-        display: list[KnowledgeRefDisplay] = []
+        # 按 (source, content_summary) 权威去重，保留首次出现且顺序稳定
+        seen: set[tuple[str, str]] = set()
+        deduped: list[KnowledgeRef] = []
         for ref in knowledge_refs:
+            key = (ref.source or "", ref.content_summary or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(ref)
+
+        display: list[KnowledgeRefDisplay] = []
+        for ref in deduped:
             try:
                 # 用 content_summary 作为核查陈述（source 可能是 LLM 编造的文档名）
                 statement = ref.content_summary or ref.source

@@ -201,6 +201,13 @@ def _save_resource_stats(session_id: str, result: dict) -> None:
     # 取 domain 和 level
     dispatch = result.get("dispatch_info") or {}
     domains = dispatch.get("domains", [])
+    # 异步路径的 dispatch_info 使用 segments 结构，每个 segment 含 domain
+    if not domains and dispatch.get("segments"):
+        domains = [
+            s.get("domain")
+            for s in dispatch["segments"]
+            if s.get("domain")
+        ]
     domain = domains[0] if domains else None
     profile = result.get("profile") or {}
     level = profile.get("knowledge_level", "ENTRY")

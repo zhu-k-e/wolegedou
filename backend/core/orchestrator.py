@@ -383,6 +383,26 @@ class Orchestrator:
             await self._run_main_fsm(ctx)
             self._task_contexts[task_id] = ctx
             self._task_results[task_id] = self._build_result(ctx, ctx.session_id, task_id)
+            result = self._task_results[task_id]
+
+            # 与同步 /api/ask 保持一致：记录会话、保存资源难度统计、保存任务指标
+            # 修复异步 /api/tasks 路径下 task_resource_stats / task_metrics 未写入，
+            # 导致 /api/report/{session_id} 的 difficulty_match.points 为空、overall_match_rate=0 的问题。
+            # 与同步 /api/ask 保持一致：记录会话、保存资源难度统计、保存任务指标
+            # 修复异步 /api/tasks 路径下 task_resource_stats / task_metrics / conversations 未写入的问题。
+            try:
+                from backend.api.routes.ask import (
+                    _record_assistant_reply,
+                    _save_resource_stats,
+                    _save_task_metrics,
+                )
+
+                _record_assistant_reply(ctx.session_id, result, task_id)
+                _save_resource_stats(ctx.session_id, result)
+                _save_task_metrics(ctx.session_id, result)
+            except Exception:
+                logger.exception(f"异步任务持久化失败（不影响主流程）: task_id={task_id}")
+
             # 落库生成资源文本（事实比对指标 + 测试数据套装数据源，容错，不增加调用时间）
             try:
                 from backend.db.resource_store import save_task_resources

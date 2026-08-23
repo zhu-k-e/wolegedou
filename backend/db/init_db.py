@@ -274,6 +274,9 @@ def init_database():
         conn.commit()
         logger.info(f"数据库表已创建/确认存在（{len(DDL_STATEMENTS)}条DDL）")
 
+        # 历史数据库 schema 迁移
+        _migrate_conversations_fk(conn)
+
         # 安全加列（已有数据库兼容）
         _safe_add_column(conn, "task_metrics", "override_reason", "TEXT")
         _safe_add_column(conn, "student_profiles", "test_results", "TEXT")
@@ -302,6 +305,56 @@ def _safe_add_column(conn, table: str, column: str, col_type: str):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
         conn.commit()
         logger.info(f"数据库迁移: {table} 加列 {column} {col_type}")
+
+
+def _migrate_conversations_fk(conn):
+    """修复历史数据库中 conversations 表外键指向 demo_cache 的问题。
+
+    旧 schema 把 conversations.task_id 外键指向 demo_cache(id)，导致异步路径
+    落库 conversations 时只要 task_id 不存在于 demo_cache 就会 FOREIGN KEY 失败。
+    新 schema 只保留 session_id 外键。本函数检测旧结构并在启动时自动重建表。
+    """
+    cursor = conn.execute("PRAGMA foreign_key_list('conversations')")
+    fks = cursor.fetchall()
+    needs_rebuild = any(fk[2] == "demo_cache" for fk in fks)
+    if not needs_rebuild:
+        return
+
+    logger.warning(
+        "检测到 conversations 表外键指向 demo_cache，正在重建为 session(session_id)..."
+    )
+    # 清理可能因上一次失败残留的临时表
+    conn.execute("DROP TABLE IF EXISTS conversations_new")
+    # 先为所有历史 conversations 的 session_id 补 session 记录，避免重建时外键失败
+    conn.execute("""
+        INSERT OR IGNORE INTO session (session_id, created_at)
+        SELECT DISTINCT session_id, datetime('now') FROM conversations
+    """)
+    conn.execute("""
+        CREATE TABLE conversations_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id  TEXT NOT NULL,
+            task_id     TEXT,
+            role        TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            is_ai_generated BOOLEAN DEFAULT 0,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at  TIMESTAMP NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES session(session_id)
+        )
+    """)
+    conn.execute("""
+        INSERT INTO conversations_new
+            (id, session_id, task_id, role, content, is_ai_generated, created_at, expires_at)
+        SELECT id, session_id, task_id, role, content, is_ai_generated, created_at, expires_at
+        FROM conversations
+    """)
+    conn.execute("DROP TABLE conversations")
+    conn.execute("ALTER TABLE conversations_new RENAME TO conversations")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_expires ON conversations(expires_at)")
+    conn.commit()
+    logger.info("conversations 表外键迁移完成")
 
 
 def _seed_system_config(conn):

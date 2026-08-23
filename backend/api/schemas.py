@@ -62,6 +62,8 @@ class AskResponse(BaseModel):
     profile: Optional[dict] = None
     resource_package: Optional[dict] = None
     judge_verdict: Optional[dict] = None
+    # 裁判团三维度评分（事实准确性/逻辑完整性/教学适用性），供前端多Agent裁判结果面板展示
+    review_summary: Optional[dict] = None
     dispatch_info: Optional[dict] = None
     navigation_roadmap: Optional[str] = None
     clarification_options: Optional[list[str]] = None

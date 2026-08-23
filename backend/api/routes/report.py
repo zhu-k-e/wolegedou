@@ -71,9 +71,24 @@ async def get_report(session_id: str) -> LearningReport:
             detail=f"未找到 session {session_id} 的学情画像，请先提问生成画像",
         )
 
-    domain_confidence = profile.get("domain_confidence", {})
     knowledge_level = profile.get("knowledge_level", "ENTRY")
     level_score = _LEVEL_SCORE.get(knowledge_level, 0.25)
+
+    # ---- 累积合并同一 session 所有历史画像的 domain_confidence ----
+    # ProfileAgent.generate_profile 对同一 session 有缓存复用机制，导致后续提问
+    # 不会更新画像。报告层需要跨版本合并，才能让热力图/学习路径/难度曲线反映
+    # 跨对话累积（方案书 2.2.4 增量更新语义）。
+    profile_history = profile_repo.get_profile_history(session_id, limit=100)
+    merged_domain_confidence: dict[str, str] = {}
+    for p in reversed(profile_history):
+        for d, v in p.get("domain_confidence", {}).items():
+            # high 优先：任一版本中标记为掌握即视为掌握；后续 low 不覆盖 high
+            if merged_domain_confidence.get(d) == "high":
+                continue
+            merged_domain_confidence[d] = v
+
+    # API 摘要仍返回最新画像的原始值；报告三组件用累积后的 domain_confidence
+    domain_confidence = merged_domain_confidence
 
     # ---- 取全部领域 Agent ----
     domain_agents = get_domain_agents()  # 10 个
