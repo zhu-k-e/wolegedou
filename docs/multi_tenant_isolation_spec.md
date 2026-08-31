@@ -26,7 +26,7 @@
 | 数据隔离粒度 | `session_id` 级 | `backend/api/routes/report.py` 全部 `WHERE session_id = ?` |
 | 用户身份 | 不存在 `user_id` / 账号 | 全仓 grep 无 `user_id` / `login` / `register` |
 | 会话归属 | 完全由调用方（前端）传入 | `ask.py` 直接采用请求体 `AskRequest.session_id` 作为隔离键（全链路 `request.session_id`），并由 `compliance.ensure_session()` 自动为传入的 session 建表记录——前端无需自建 session 表 |
-| 参考页实现 | 每次刷新随机 `demo-session-<Date.now()>` | `frontend_reference.html:232` |
+| 参考页实现 | 每次刷新随机 `demo-session-<Date.now()>` | `src/` 前端 demo 模式（无账号，按需生成 session） |
 | 离线加速开关 | `demo_cache_enabled` 默认 `False` | `backend/config.py:100` |
 
 **审计结论**：后端数据层已可服务任意多学员并发隔离；缺口仅在于**前端驱动 + 身份层**。后端无需重构。
@@ -60,6 +60,6 @@
 
 ## 6. 给前端实现的落地提示
 
-1. 不要依赖 `frontend_reference.html` 的随机 session 写法（`demo-session-` + 时间戳），那仅用于单页 demo，无连续性。
+1. 不要依赖旧单页 demo 的随机 session 写法（`demo-session-` + 时间戳），那仅用于演示，无连续性。
 2. 若暂不做登录系统，最低成本方案：`localStorage` 按学员标识持久化 session_id，切换学员时读对应值。
 3. 后端接口契约不变，无需新增端点；所有多用户能力来自"前端正确管理与传递 session_id"。

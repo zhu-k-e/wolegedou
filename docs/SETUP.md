@@ -76,7 +76,7 @@ python backend/main.py
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-接口约定与前端对接见 `internal/frontend_integration_guide.md`（《前端对接指南》）。
+接口约定与前端对接见 `docs/report_api.md`（报告 API）与 `docs/memory_stats_api.md`（贡献记忆 API）。
 公开演示可用 cloudflared 内网穿透：
 
 ```bash
@@ -98,9 +98,9 @@ cloudflared tunnel --url http://localhost:8000
 
 ## 7. 知识库来源与版权合规
 
-检索知识库内容源于**公开 AI / LLM 技术文档与社区资料的批量抓取**，原始来源 URL 在构建时**未持久化**（见 `internal/KB_PROVENANCE.md`）。竞赛提交前须完成以下任一项：
+检索知识库内容源于**公开 AI / LLM 技术文档与社区资料的批量抓取**，原始来源 URL 在构建时**未持久化**（见 `docs/KB_PROVENANCE.md`）。竞赛提交前须完成以下任一项：
 
 - **补全来源标注**：重建向量库时写入每条 chunk 的 `source` 原始链接，并在项目声明中附注「仅用于研究/教学演示，侵权即下架」；
 - **替换为授权语料**：采用 CC-BY 等明确授权文档或团队自建讲义，随提交附 `LICENSES` 清单。
 
-> 在处置完成前，知识库内容仅限内部研发与教学演示使用。详细处置步骤与责任声明见 `internal/KB_PROVENANCE.md`。
+> 在处置完成前，知识库内容仅限内部研发与教学演示使用。详细处置步骤与责任声明见 `docs/KB_PROVENANCE.md`。
