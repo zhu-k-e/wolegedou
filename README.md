@@ -84,7 +84,7 @@ pytest backend/tests/ -q      # 212 个单元测试（含 FSM 协同调度、知
 
 ## 文档索引
 
-- `docs/proposal.md` —— 作品设计实现方案（主文档）
+- `docs/proposal.md` —— 早期方案书快照（v7.0，2026-07-13；最新权威版见参赛提交材料文档）
 - `docs/proposal_techspec.md` —— 技术规格书
 - `docs/metrics_validation_report.md` / `docs/metrics_summary.md` —— 指标验证
 - `docs/report_api.md` / `docs/memory_stats_api.md` —— 接口说明

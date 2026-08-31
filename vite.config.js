@@ -8,17 +8,17 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'https://stations-timer-estimate-philip.trycloudflare.com',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         timeout: 60000,
         proxyTimeout: 60000
       },
       '/health': {
-        target: 'https://stations-timer-estimate-philip.trycloudflare.com',
+        target: 'http://localhost:8000',
         changeOrigin: true
       },
       '/ws': {
-        target: 'https://stations-timer-estimate-philip.trycloudflare.com',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         ws: true
       }

@@ -1,5 +1,6 @@
 export function connectFSM(taskId, onMessage, onClose) {
-  const wsDomain = 'wss://stations-timer-estimate-philip.trycloudflare.com'
+  // WS 地址动态推导：本地开发走 vite proxy（/ws），生产走同域；可用 VITE_WS_URL 覆盖
+  const wsDomain = import.meta.env.VITE_WS_URL || (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host
   const wsUrl = wsDomain + `/ws/${taskId}`
 
   const ws = new WebSocket(wsUrl)
