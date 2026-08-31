@@ -1,0 +1,33 @@
+# ---- 隐私 / 运行时数据库（含所有命名变体）：绝不进镜像 ----
+# 这些文件在 git 中已被 .gitignore 排除，但 Docker 构建用 COPY data/ 会绕过 git 忽略，
+# 必须在此显式排除，否则 wolegedou.db（含全部对话/学生画像/会话）会泄漏进镜像。
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.db.bak_*
+**/wolegedou.db.backup.*
+**/wolegedou.backup_*.db
+**/app.db
+
+# ---- 日志 ----
+**/*.log
+
+# ---- 评测备份 json（含隐私运行态）----
+**/bm_backup_*
+**/eval_backup_*
+
+# ---- 诊断 / 临时产物 ----
+**/_*.json
+**/_*.py
+**/coverage_*_result.txt
+**/diag_*.json
+**/offline_*_result.txt
+**/offline_*_experiment_*.txt
+
+# ---- 巨型本地模型（约 2.2GB）：容器 entrypoint 会自动拉取或运行时挂载，不烤进镜像 ----
+data/bge_m3_model/
+
+# ---- 版本控制元数据 ----
+.git
+**/.git
+.gitignore

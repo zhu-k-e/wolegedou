@@ -1,0 +1,149 @@
+{
+  "session_id": "bm_TC-048",
+  "input_profile": {
+    "session_id": "bm_TC-048",
+    "version": 1,
+    "knowledge_level": "进阶",
+    "background": "developer",
+    "current_goal": "项目落地",
+    "question_type": "操作步骤",
+    "domain_hint": "[\"Agent框架\"]",
+    "complexity_estimate": "单领域",
+    "intent_type": "generation",
+    "domain_confidence": "{\"Agent框架\": \"high\"}",
+    "created_at": "2026-08-13 18:22:10",
+    "test_results": null
+  },
+  "decision_mid": {
+    "id": 1020,
+    "task_id": "task_fa8b0aa6759b",
+    "session_id": "bm_TC-048",
+    "verdict": "low_confidence_passed",
+    "verification_rate": 0.8,
+    "traceability_total": 15,
+    "traceability_verified": 12,
+    "knowledge_refs_count": 5,
+    "fact_accuracy": 1.0,
+    "logic_completeness": 0.8,
+    "pedagogical_fit": 0.85,
+    "review_score": 0.8833333333333333,
+    "override_reason": null,
+    "created_at": "2026-08-13 18:22:10"
+  },
+  "output_resources": {
+    "lecture": {
+      "title": "多Agent协作流程：规划-执行-审查模式深度解析",
+      "content_markdown": "# 多Agent协作流程：规划-执行-审查模式深度解析\n\n## 1. 核心概念与定义\n\n- **多Agent系统（Multi-Agent System）**：由多个自主智能体（Agent）组成的系统，每个Agent具有特定的角色和职责，通过协作完成复杂任务。\n- **规划-执行-审查模式（Plan-Execute-Review Pattern）**：一种协作范式，将任务分解为规划（Plan）、执行（Execute）和审查（Review）三个阶段，分别由不同Agent负责，确保任务高效且高质量完成。\n- **消息传递机制（Message Passing）**：Agent之间通过交换消息进行通信和数据流转，常见实现包括消息队列（如RabbitMQ）和黑板系统（Blackboard System）。\n- **任务ID（Task ID）**：唯一标识每个子任务的编号，用于跟踪任务状态、关联结果和进行质量审查。\n- **模型客户端（Model Client）**：Agent用于调用大语言模型（LLM）的接口，是Agent推理和决策的基础。\n- **工具（Tool）**：Agent可调用的外部功能模块，如数学计算工具、API等，用于执行具体操作。\n\n## 2. 工作原理/机制\n\n多Agent协作流程的核心在于**角色分离**和**数据流转**。\n\n- **角色分离**：规划Agent、执行Agent和审查Agent各司其职，形成流水线。规划Agent负责全局思考，执行Agent专注于具体操作，审查Agent把控质量。\n- **数据流转**：任务和结果通过消息传递机制在各Agent间流动。共享消息队列或黑板系统确保数据一致性和可追溯性，每个Agent订阅和发布消息，实现解耦。\n- **反馈循环**：审查Agent发现问题时，通过反馈机制将修正指令发送给执行Agent或规划Agent，形成闭环，持续优化结果。\n\n## 3. 关键步骤/流程\n\n1. **任务接收**：用户将整体任务提交给系统。\n2. **规划（Plan）**：规划Agent接收任务，进行任务分解，生成子任务列表及依赖关系，输出结构化任务计划，并为每个子任务生成唯一任务ID。\n3. **执行（Execute）**：执行Agent根据任务计划，逐个执行子任务，调用工具或模型，生成结果，并将结果与任务ID关联。\n4. **审查（Review）**：审查Agent对执行结果进行质量检查，验证是否符合要求。若通过，则汇总输出最终结果；若不通过，则反馈给执行Agent或规划Agent进行修正。\n5. **结果汇总**：所有子任务通过审查后，汇总为最终答案返回给用户。\n\n## 4. 关键技术点与组件\n\n### 4.1 消息队列与黑板系统\n- **消息队列（如RabbitMQ）**：一种异步通信中间件，通过队列存储消息，支持发布/订阅模式。在Python中常用`pika`库进行交互。\n- **黑板系统**：一种共享数据存储，各Agent读写黑板上的信息，实现协作。适合需要共享复杂状态的场景。\n\n### 4.2 任务ID生成与管理\n- 规划Agent负责生成唯一ID，通常使用UUID或递增序列。\n- 任务ID贯穿整个流程，执行结果必须携带对应ID，审查Agent据此定位和验证。\n\n### 4.3 错误处理与反馈机制\n- 定义标准化的错误消息类型或状态码（如`ERROR_TYPE`），便于Agent识别和响应。\n- 反馈机制可以是直接消息，也可以是黑板上的标记。\n- 需考虑多次尝试仍失败的情况，可设置最大重试次数或升级到人工介入。\n\n### 4.4 Agent框架（以AutoGen为例）\n- `AssistantAgent`：定义Agent角色，通过`system_message`设定行为，通过`model_client`接入LLM，通过`tools`集成外部工具。\n- `RoundRobinGroupChat`：一种团队协作模式，Agent按顺序轮流发言，适合简单的流水线。\n- `MaxMessageTermination`：终止条件，控制对话轮数。\n\n## 5. 最佳实践\n\n- **明确角色边界**：确保每个Agent的职责清晰，避免重叠。\n- **设计高效的消息协议**：定义消息格式和类型，减少解析开销。\n- **合理设置终止条件**：避免无限循环，如设置最大消息数或超时。\n- **使用结构化输出**：规划Agent输出JSON等结构化计划，便于执行Agent解析。\n- **监控与日志**：记录每个Agent的输入输出，便于问题追踪。\n\n## 6. 常见误区与边界情况\n\n- **误区1：所有任务都适合多Agent协作**。简单任务使用多Agent反而增加开销，应评估任务复杂度。\n- **误区2：忽略消息传递的延迟**。在高频交互场景，消息队列可能成为瓶颈，需考虑性能优化。\n- **误区3：任务ID管理混乱**。若不严格关联ID，审查将无法对应结果，导致质量失控。\n- **边界情况：审查Agent无法判断结果正确性**。此时可能需要引入更多上下文或人工审查。\n- **边界情况：多个子任务存在依赖**。规划Agent需正确处理依赖关系，避免死锁。\n\n## 7. 底层原理（进阶扩展）\n\n- **通信机制底层**：消息队列基于AMQP协议，保证消息可靠投递；黑板系统基于共享内存或分布式存储，支持并发访问。\n- **Agent推理机制**：每个Agent内部通过LLM进行推理，其`system_message`相当于系统提示，影响Agent的行为模式。\n- **协作效率**：规划-执行-审查模式本质是流水线并行，可类比CPU的指令流水线，通过阶段重叠提高吞吐量。\n\n## 8. 代码示例（基于AutoGen）\n\n```python\nfrom autogen_agentchat.agents import AssistantAgent\nfrom autogen_agentchat.teams import RoundRobinGroupChat\nfrom autogen_agentchat.conditions import MaxMessageTermination\nimport asyncio\n\n# 定义数学工具类（仅示意）\nclass MathTool:\n    def __init__(self):\n        pass\n    def calculate(self, expr):\n        # 实际实现数学计算\n        return eval(expr)\n\n# 定义模型客户端（需根据实际配置）\nmodel_client = ...  # 例如OpenAI客户端\n\n# 定义数学工具实例\nmath_tool = MathTool()\n\n# 规划Agent\nplanner = AssistantAgent(\n    \"planner\",\n    system_message=\"You are a planner. Decompose the task into subtasks.\",\n    model_client=model_client\n)\n\n# 执行Agent，集成工具\nexecutor = AssistantAgent(\n    \"executor\",\n    system_message=\"You are an executor. Execute subtasks using tools.\",\n    model_client=model_client,\n    tools=[math_tool]  # 注意：实际工具需符合AutoGen接口\n)\n\n# 审查Agent\nreviewer = AssistantAgent(\n    \"reviewer\",\n    system_message=\"You are a reviewer. Check the results.\",\n    model_client=model_client\n)\n\n# 创建团队并运行\ntermination = MaxMessageTermination(max_messages=10)\nteam = RoundRobinGroupChat([planner, executor, reviewer], termination_condition=termination)\n\nasync def main():\n    result = await team.run(task=\"Solve the integral of x^2.\")\n    print(result)\n\nasyncio.run(main())\n```\n\n**代码说明**：\n- `AssistantAgent`创建Agent，`system_message`定义角色。\n- `tools`参数集成外部工具，执行Agent可调用。\n- `RoundRobinGroupChat`按顺序让Agent发言，实现协作。\n- `MaxMessageTermination`限制消息数，防止无限循环。\n\n## 9. 常见问题与解决方案\n\n- **问题1：执行Agent无法正确调用工具**。检查工具接口是否匹配，或增加工具描述。\n- **问题2：审查Agent误判**。优化审查Agent的提示词，或增加规则校验。\n- **问题3：任务分解不合理**。调整规划Agent的提示词，或引入领域知识。\n\n## 10. 总结\n\n多Agent协作流程通过规划-执行-审查模式，将复杂任务分解为可管理的子任务，并通过消息传递机制实现数据流转和质量控制。理解其核心概念、流程和关键技术点，有助于在实际项目中高效应用。\n\n\n> ⚠️ **代码安全检查警告**：检测到以下问题：代码块1: 潜在危险操作: .run() (行50); 危险函数调用: eval (行12); 潜在危险操作: .run() (行47)。请仔细检查代码示例后再使用。",
+      "difficulty_note": "进阶水平：包含底层原理扩展，适合有Python基础和Agent框架了解的进阶学习者。",
+      "knowledge_refs_display": [
+        {
+          "source": "microsoft_autogen_README.md",
+          "verification_status": "已验证"
+        },
+        {
+          "source": "microsoft_autogen_README.md",
+          "verification_status": "已验证"
+        },
+        {
+          "source": "（知识库补全）",
+          "verification_status": "未命中KB检索"
+        },
+        {
+          "source": "（知识库补全）",
+          "verification_status": "未命中KB检索"
+        },
+        {
+          "source": "（知识库补全）",
+          "verification_status": "未命中KB检索"
+        }
+      ]
+    },
+    "practice_guide": {
+      "goal": "通过实操掌握多Agent协作流程的规划-执行-审查模式，并理解消息传递与任务管理机制。",
+      "env_setup": "已安装Python 3.8+，并安装autogen-agentchat库（pip install autogen-agentchat）。",
+      "steps_markdown": "### 步骤1：导入必要的库和模块\n```python\nfrom autogen_agentchat.agents import AssistantAgent\nfrom autogen_agentchat.teams import RoundRobinGroupChat\nfrom autogen_agentchat.conditions import MaxMessageTermination\nimport asyncio\n```\n\n### 步骤2：定义模型客户端和工具\n```python\n# 假设已有模型客户端（如OpenAI客户端）\nmodel_client = ...  # 请替换为实际的模型客户端配置\n\n# 定义一个简单的数学工具类，实际使用时需实现具体功能\nclass MathTool:\n    def __init__(self):\n        pass\n    def calculate_integral(self, expression: str) -> str:\n        # 这里仅作示意，实际应调用数学库或API\n        return f\"Integral of {expression} is ...\"\n\nmath_tool = MathTool()\n```\n\n### 步骤3：创建规划、执行、审查三个Agent\n```python\nplanner = AssistantAgent(\n    \"planner\",\n    system_message=\"You are a planner. Decompose the task into subtasks and generate a plan.\",\n    model_client=model_client\n)\n\nexecutor = AssistantAgent(\n    \"executor\",\n    system_message=\"You are an executor. Execute subtasks using tools if needed.\",\n    model_client=model_client,\n    tools=[math_tool]  # 将工具传递给执行Agent\n)\n\nreviewer = AssistantAgent(\n    \"reviewer\",\n    system_message=\"You are a reviewer. Check the results for correctness and provide feedback.\",\n    model_client=model_client\n)\n```\n\n### 步骤4：设置终止条件并创建团队\n```python\ntermination = MaxMessageTermination(max_messages=10)  # 最多10轮消息后终止\nteam = RoundRobinGroupChat([planner, executor, reviewer], termination_condition=termination)\n```\n\n### 步骤5：运行团队并执行任务\n```python\nasync def main():\n    result = await team.run(task=\"Solve the integral of x^2.\")\n    print(result)\n\nasyncio.run(main())\n```\n\n### 步骤6：验证输出\n- 检查最终结果是否包含积分答案。\n- 观察过程中各Agent的消息流转，理解规划、执行、审查的协作。\n\n\n> ⚠️ **代码安全检查警告**：代码块5: 潜在危险操作: .run() (行5); 潜在危险操作: .run() (行2)。请仔细检查代码后再使用。",
+      "expected_output": "运行后，控制台会输出团队协作的完整对话记录，最终结果应包含对x^2积分的正确求解（例如：x^3/3 + C）。同时，可以看到规划Agent分解任务、执行Agent调用工具计算、审查Agent确认结果的流程。",
+      "common_issues": [
+        "模型客户端配置错误：请确保model_client正确初始化，否则Agent无法工作。",
+        "工具未正确传递：执行Agent必须通过tools参数接收工具实例，否则无法调用。",
+        "终止条件设置不当：如果max_messages过小，任务可能未完成就终止；过大则可能浪费资源。"
+      ]
+    },
+    "quiz": {
+      "questions": [
+        {
+          "question": "在多Agent协作流程中，规划Agent的主要职责是什么？",
+          "type": "选择",
+          "options": [
+            "A. 执行具体子任务并生成结果",
+            "B. 接收用户任务，进行任务分解，生成子任务列表和依赖关系，输出结构化任务计划",
+            "C. 对执行结果进行质量检查",
+            "D. 管理消息队列和黑板系统"
+          ],
+          "answer": "B",
+          "explanation": "规划Agent负责接收用户任务，将其分解为子任务，并生成任务计划，包括任务ID和依赖关系。执行Agent负责执行子任务，审查Agent负责质量检查。",
+          "difficulty": "基础"
+        },
+        {
+          "question": "请简述在多Agent协作流程中，数据是如何在各Agent之间流转的？为什么采用这种机制？",
+          "type": "简答",
+          "options": [],
+          "answer": "数据通过共享消息队列或黑板系统在各Agent间流转。每个Agent订阅和发布消息，确保数据一致性和可追溯性。这种机制使得各Agent能够高效地交换信息，避免直接耦合，同时支持异步通信和故障隔离。",
+          "explanation": "该机制保证了数据的一致性和可追溯性，支持Agent之间的解耦和异步通信，是流程高效运行的关键。",
+          "difficulty": "应用"
+        },
+        {
+          "question": "假设审查Agent发现执行Agent的结果不符合要求，且经过多次反馈修正后仍无法满足要求。请分析可能的原因，并提出改进方案。",
+          "type": "简答",
+          "options": [],
+          "answer": "可能原因：任务分解不合理导致子任务目标不明确；执行Agent的工具或模型能力不足；反馈机制不完善，未能清晰传达错误信息。改进方案：优化规划Agent的任务分解策略；升级执行Agent的工具或模型；完善反馈机制，定义更具体的错误类型和状态码；设置最大重试次数，超过后转人工处理。",
+          "explanation": "本题考查对错误处理与反馈机制的理解，要求结合实际场景分析并给出解决方案。",
+          "difficulty": "综合"
+        },
+        {
+          "question": "在多Agent协作流程中，任务ID的生成和管理对于确保流程正确性至关重要。以下关于任务ID的说法，错误的是？",
+          "type": "选择",
+          "options": [
+            "A. 任务ID由规划Agent生成，并与子任务关联",
+            "B. 执行Agent执行任务后，结果需要标记相同的任务ID",
+            "C. 任务ID可以用于追踪子任务的状态和结果",
+            "D. 任务ID必须由外部系统生成，以保证唯一性"
+          ],
+          "answer": "D",
+          "explanation": "任务ID由规划Agent生成，并非必须由外部系统生成。规划Agent负责生成唯一标识符，并与子任务关联。",
+          "difficulty": "基础"
+        },
+        {
+          "question": "请设计一个多Agent协作流程，用于完成“分析给定的销售数据并生成可视化报告”的任务。要求包含规划、执行、审查三个Agent，并说明各Agent的职责、数据流转方式以及如何处理执行结果不达标的情况。",
+          "type": "设计分析",
+          "options": [],
+          "answer": "设计：规划Agent接收任务，分解为数据清洗、数据分析、图表生成三个子任务，并生成任务ID。执行Agent根据任务ID分别执行子任务，使用数据清洗工具、分析模型和绘图工具，并将结果标记任务ID。审查Agent检查数据准确性、分析逻辑和图表质量，若通过则汇总输出；若不通过，则反馈给执行Agent或规划Agent进行修正。数据通过消息队列流转，每个Agent订阅和发布消息。若多次修正仍不达标，则转人工处理。",
+          "explanation": "本题综合考查多Agent协作流程的设计能力，包括任务分解、职责划分、数据流转和错误处理。",
+          "difficulty": "进阶"
+        }
+      ]
+    },
+    "knowledge_refs": [
+      {
+        "source": "microsoft_autogen_README.md",
+        "verification_status": "已验证"
+      },
+      {
+        "source": "microsoft_autogen_README.md",
+        "verification_status": "已验证"
+      },
+      {
+        "source": "（知识库补全）",
+        "verification_status": "未命中KB检索"
+      },
+      {
+        "source": "（知识库补全）",
+        "verification_status": "未命中KB检索"
+      },
+      {
+        "source": "（知识库补全）",
+        "verification_status": "未命中KB检索"
+      }
+    ]
+  }
+}

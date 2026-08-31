@@ -1,0 +1,5 @@
+# 强制容器/Shell 相关文件使用 LF 换行，避免 Windows CRLF 导致
+# 镜像内 `#!/bin/sh^M` 解释器报错或 Dockerfile 解析异常。
+*.sh text eol=lf
+Dockerfile text eol=lf
+.gitattributes text eol=lf
