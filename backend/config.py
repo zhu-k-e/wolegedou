@@ -20,15 +20,15 @@ class Settings(BaseSettings):
     # 中档模型
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-chat"
 
     # 高档模型
     openai_api_key: str = ""
-    openai_base_url: str = "https://api.openai.com/v1"
-    openai_model: str = "gpt-4o"
+    openai_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    openai_model: str = "qwen-max"
 
     # 低档模型
-    openai_mini_model: str = "gpt-4o-mini"
+    openai_mini_model: str = "qwen-turbo"
 
     # --- 数据库 ---
     db_path: str = "data/wolegedou.db"
