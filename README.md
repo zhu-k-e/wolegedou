@@ -39,7 +39,7 @@ DEPLOYMENT.md        全新机部署指南
 git clone https://github.com/zhu-k-e/wolegedou.git
 cd wolegedou
 
-# 2. 配置环境变量（填入你的 API Key）
+# 2. 配置环境变量（自备 API Key，获取指引见 DEPLOYMENT.md）
 cp .env.example .env
 
 # 3. 安装依赖（Python 3.13）

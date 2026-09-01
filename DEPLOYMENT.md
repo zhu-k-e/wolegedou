@@ -11,6 +11,18 @@
 - 依赖见 `requirements.txt`
 - 运行需要一个 `.env` 配置文件（含 LLM API Key、端口等），模板见 `.env.example`
 
+### API Key 获取（自备，约 5 分钟）
+
+系统调用三档大模型 API，**需自备 Key**（模板见 `.env.example`，占位符 `sk-your-*` 处替换为真实 Key）：
+
+| 档位 | 平台 | 注册入口 | 说明 |
+|---|---|---|---|
+| MID（deepseek-chat） | DeepSeek 开放平台 | https://platform.deepseek.com | 国内注册，新用户有免费额度，价格极低 |
+| HIGH/LOW（qwen-max / qwen-turbo） | 阿里云百炼（DashScope） | https://bailian.console.aliyun.com | 国内注册，开通 DashScope 服务后创建 Key，有免费额度 |
+
+> 系统可只配 MID 档即可跑通核心链路（部分轻量判断会降级）；两个都配为完整档位。
+> 注意：API Key 为私有关键资产，**请勿提交到仓库/镜像/压缩包**（`.env` 已被 .gitignore 与 .dockerignore 双重排除）。
+
 ---
 
 ## 2. ⚠️ OpenMP 段错误（SIGSEGV）Workaround（必读）
