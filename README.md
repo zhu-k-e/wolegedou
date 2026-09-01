@@ -21,7 +21,7 @@ backend/             FastAPI 后端（agents/api/core/db/services/schemas/prompt
   agents/            11 个智能体（诊断/调度/生成/审核/裁判/安全…）
   core/              FSM 状态机 + 编排器
   services/          RAG 知识库 / LLM 客户端 / JSON 三层兜底 / AST 安全
-  tests/             15 个测试文件、212 个单元测试用例
+  tests/             15 个测试文件（pytest 收集 214 项：207 通过 + 7 条件跳过，未配置 API Key 时 e2e 自动跳过；配置后全部运行）
 src/                 前端（React + Vite）
 data/
   numpy_kb/          知识库切片（30532 chunks，分卷存储，启动自动合并）
@@ -68,7 +68,7 @@ npm run build    # 生产构建（产物在 dist/）
 ## 运行测试
 
 ```bash
-pytest backend/tests/ -q      # 212 个单元测试（含 FSM 协同调度、知识生成准确性等）
+pytest backend/tests/ -q      # 214 项：207 通过 + 7 条件跳过（无 Key 时 e2e 跳过）；配置 .env 后全部运行
 ```
 
 ## 实测指标（100 条 benchmark）
