@@ -29,7 +29,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 不入库 / 不应进提交包的目录与文件
 EXCLUDE_DIRS = {
-    ".git", ".venv", ".venv_test", "__pycache__", "node_modules",
+    ".git", ".venv", ".venv_test", "__pycache__",
     ".idea", ".vscode", ".workbuddy", "outputs", ".pytest_cache", "data",
 }
 EXCLUDE_SUFFIX = (".pyc", ".db", ".db-shm", ".db-wal", ".log", ".bak", ".backup", ".exe")
@@ -78,7 +78,10 @@ def copy_tree(src: str, dst: str, manifest: list, total: list, label: str):
             if rel_root == "scripts" and fn.startswith(DEBUG_SCRIPT_PREFIX):
                 continue
             # 根目录仅保留工程文件，排除实验/调试脚本与响应 dump
-            if rel_root == "." and (fn.endswith(".py") or fn.endswith(".json")):
+            if rel_root == "." and fn.endswith(".py"):
+                continue
+            if rel_root == "." and fn.endswith(".json") and fn not in (
+                "package.json", "package-lock.json"):
                 continue
             s = os.path.join(root, fn)
             d = os.path.join(dst, rel_root, fn)
@@ -86,8 +89,13 @@ def copy_tree(src: str, dst: str, manifest: list, total: list, label: str):
             shutil.copy2(s, d)
             size = os.path.getsize(s)
             total[0] += size
+            # node_modules 文件极多，跳过逐文件 sha（仅记大小 + 占位），避免 MANIFEST 爆炸
+            if "node_modules" in parts:
+                digest = "node_modules-skip"
+            else:
+                digest = sha256(s)
             manifest.append((f"{label}/{rel_root}/{fn}" if rel_root != "." else f"{label}/{fn}",
-                             size, sha256(s)))
+                             size, digest))
 
 
 def copy_data_dir(name: str, dst_root: str, manifest: list, total: list, optional: bool):
@@ -202,13 +210,20 @@ def main():
             "二、配置 API Key（生成类接口必需）\n"
             "       cp .env.example .env\n"
             "       编辑 .env，填入 DEEPSEEK_API_KEY 与 OPENAI_API_KEY\n\n"
-            "三、启动（一键，自动设 OMP / 合并知识库分卷）\n"
+            "三、启动（推荐：一键同时拉起前端 + 后端）\n"
+            "       python scripts/start_all.py\n"
+            "   • 后端自动起在 :8000；前端（Vite）自动起在 :5176 并代理 /api、/ws 到后端。\n"
+            "   • 评委浏览器打开 http://localhost:5176 即可看到完整系统：\n"
+            "       创建学习任务 → 多智能体调度可视化 → 资源生成。\n"
+            "   • 前置：评委机器需有 Node.js 18+（提交包内已含 node_modules，无需联网 install）。\n\n"
+            "   仅后端（无界面）：\n"
             "       python scripts/start_server.py\n"
             "   或手动：\n"
             "       set OMP_NUM_THREADS=1\n"
             "       uvicorn backend.main:app --host 0.0.0.0 --port 8000\n\n"
             "四、验证\n"
-            "       浏览器打开 http://localhost:8000/docs\n"
+            "       前端：浏览器 http://localhost:5176 （可创建任务并观察调度可视化）\n"
+            "       后端 API：浏览器 http://localhost:8000/docs\n"
             "       或 curl http://localhost:8000/health  →  {\"status\":\"ok\"}\n\n"
             "五、演示视频见 demo_video/ 目录。\n"
             "详细说明见 wolegedou/DEPLOYMENT.md 与 wolegedou/docs/SETUP.md。\n"

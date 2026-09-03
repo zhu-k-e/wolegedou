@@ -7,19 +7,20 @@ export default defineConfig({
   server: {
     port: 5176,
     strictPort: true,
+    // 后端地址可经环境变量覆盖（默认 8000），方便评委自定义端口或本机多实例
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: process.env.BACKEND_URL || 'http://localhost:8000',
         changeOrigin: true,
-        timeout: 60000,
-        proxyTimeout: 60000
+        timeout: 180000,
+        proxyTimeout: 180000
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: process.env.BACKEND_URL || 'http://localhost:8000',
         changeOrigin: true
       },
       '/ws': {
-        target: 'http://localhost:8000',
+        target: process.env.BACKEND_URL || 'http://localhost:8000',
         changeOrigin: true,
         ws: true
       }
