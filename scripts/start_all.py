@@ -6,10 +6,11 @@
 前端使用 Vite dev server（vite.config.js 已配置 proxy：/api、/health、/ws → 后端 8000），
 因此评委只需本脚本，无需手动配置跨域或反向代理。
 
-前置：
-  - 后端：Python 3.13 + .venv（含依赖）；或系统 Python + pip install -r requirements.txt
-  - 前端：已 npm install（提交包内已含 node_modules）；评委机器需有 Node.js 18+
-  - .env 已填 OPENAI_API_KEY / DEEPSEEK_API_KEY（见 .env.example）
+前置（脚本会自动处理，评委通常无需手动操作）：
+  - 后端：若 .venv 不存在或依赖缺失，本脚本自动创建虚拟环境并 pip install -r requirements.txt
+    （首次需联网，约 1-3 分钟；模型与知识库已离线内置，无需下载）。
+  - 前端：提交包内已含 node_modules，评委机器需有 Node.js 18+（无需联网 install）。
+  - .env：若不存在，本脚本自动从 .env.example 复制；评委需编辑填入 API Key 后重启。
 
 用法：
   python scripts/start_all.py                 # 后端 8000 + 前端 5176
@@ -26,6 +27,10 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 陌生人自举：自动建 venv + 装依赖 + 生成 .env
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+import deploy_bootstrap as _boot  # noqa: E402
 
 # 防 bge-m3 多线程段错误
 for _k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
@@ -77,8 +82,13 @@ def main():
     ap.add_argument("--frontend-port", type=int, default=5176)
     args = ap.parse_args()
 
+    # 自动建 .env（若缺失）
+    _boot.ensure_env_file()
+
+    # 自动建 venv + 装依赖（若缺失），返回可用的 python
+    py = _boot.ensure_python_with_deps()
+
     # ---- 后端 ----
-    py = sys.executable
     backend_cmd = [py, "-m", "uvicorn", "backend.main:app",
                    "--host", args.host, "--port", str(args.backend_port)]
     print(_color("36", f"▶ 启动后端 uvicorn @ http://{args.host}:{args.backend_port} ..."))

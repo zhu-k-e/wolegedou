@@ -15,7 +15,8 @@
   python scripts/start_server.py --port 8080     # 自定义端口
   python scripts/start_server.py --host 127.0.0.1
 
-依赖：需已 pip install -r requirements.txt，且 data/ 下资产就绪（见部署说明）。
+依赖：若 .venv 不存在或依赖缺失，本脚本自动创建虚拟环境并 pip install -r requirements.txt
+（首次需联网，约 1-3 分钟；模型与知识库已离线内置，无需下载）。data/ 下资产需就绪（见部署说明）。
 """
 import os
 import sys
@@ -29,6 +30,10 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 import argparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 陌生人自举：自动建 venv + 装依赖 + 生成 .env
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+import deploy_bootstrap as _boot  # noqa: E402
 
 
 def _red(msg: str) -> str:
@@ -130,6 +135,10 @@ def main() -> int:
     if not ok_model:
         print(_yellow("\n模型缺失：系统仍可启动，但首次查询会尝试在线下载，可能较慢或失败。"))
 
+    # 自动建 .env（若缺失）与 venv + 依赖（若缺失）
+    _boot.ensure_env_file()
+    py = _boot.ensure_python_with_deps()
+
     print("\n" + "-" * 60)
     print(f"  即将启动：uvicorn backend.main:app --host {args.host} --port {args.port}")
     print("  启动后访问：")
@@ -140,9 +149,9 @@ def main() -> int:
         print(_yellow("  （提示：未配置 API Key，生成类接口将返回错误，仅架构/检索可演示）"))
     print("-" * 60 + "\n")
 
-    # 用同进程已设好的环境变量启动 uvicorn 子进程，确保 OMP 生效
+    # 用自举得到的 python 启动 uvicorn 子进程，确保 OMP 生效且依赖已装
     cmd = [
-        sys.executable, "-m", "uvicorn",
+        py, "-m", "uvicorn",
         "backend.main:app",
         "--host", args.host,
         "--port", str(args.port),
