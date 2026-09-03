@@ -31,13 +31,3 @@ data/bge_m3_model/
 .git
 **/.git
 .gitignore
-
-# ---- 开发环境目录（避免 build context 传输 GB 级本地虚拟环境）----
-.venv
-.venv_test
-.idea
-.pytest_cache
-__pycache__/
-**/__pycache__/
-node_modules
-.workbuddy

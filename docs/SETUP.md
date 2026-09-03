@@ -13,12 +13,16 @@
 ## 1. 基础依赖
 
 ```bash
-# 建议使用 Python 3.10+
+# 必须使用 Python 3.13
+# ⚠️ 不可用 3.10：缺少 FlagEmbedding 会导致知识库降级为 Stub，检索失效、指标失真
 cd wolegedou
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt  # 或 pyproject 对应安装命令
+pip install -r requirements.txt
 ```
+
+> 拉取 bge-m3 模型需要本地安装 [Git](https://git-scm.com/downloads)。
+> Docker 镜像已内置 git，本地部署请确保 `git --version` 可执行。
 
 ## 2. 补齐嵌入模型 bge-m3
 
@@ -61,8 +65,14 @@ cat data/numpy_kb/vectors.npy.part* > data/numpy_kb/vectors.npy
 
 ```bash
 cp .env.example .env
-# 编辑 .env，设置 LLM_API_KEY / LLM_BASE_URL 等
+# 编辑 .env，填写以下两个字段（其余均有默认值，无需改动）：
+#   DEEPSEEK_API_KEY=sk-xxx   # DeepSeek 平台申请（中档模型 deepseek-chat）
+#   OPENAI_API_KEY=sk-xxx     # 阿里云 DashScope 申请（qwen-max / qwen-turbo）
 ```
+
+> ⚠️ 注意：配置中**没有** `LLM_API_KEY` / `LLM_BASE_URL` 这类字段，
+> 字段名以 `.env.example` 为准（对应 `config.py` 的 `deepseek_api_key` / `openai_api_key`）。
+> 填错字段名会导致 Key 读不到、LLM 调用失败。
 
 > 注意：`.env` 优先级高于 `config.py` 默认值，改任何配置前先 `grep` 确认两处。
 
@@ -76,12 +86,10 @@ python backend/main.py
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-接口约定与前端对接见 `docs/report_api.md`（报告 API）与 `docs/memory_stats_api.md`（贡献记忆 API）。
-公开演示可用 cloudflared 内网穿透：
+接口约定与前端对接见 `internal/frontend_integration_guide.md`（《前端对接指南》），
+学情诊断报告渲染格式见 `docs/report_api.md`。
 
-```bash
-cloudflared tunnel --url http://localhost:8000
-```
+> 注意：公开演示用的 cloudflared 内网穿透仅供开发联调，**不建议写入部署说明或要求评委配置**。
 
 ## 6. 资产清单（评审自检）
 
@@ -98,9 +106,9 @@ cloudflared tunnel --url http://localhost:8000
 
 ## 7. 知识库来源与版权合规
 
-检索知识库内容源于**公开 AI / LLM 技术文档与社区资料的批量抓取**，原始来源 URL 在构建时**未持久化**（见 `docs/KB_PROVENANCE.md`）。竞赛提交前须完成以下任一项：
+检索知识库内容源于**公开 AI / LLM 技术文档与社区资料的批量抓取**，原始来源 URL 在构建时**未持久化**（见 `internal/KB_PROVENANCE.md`）。竞赛提交前须完成以下任一项：
 
 - **补全来源标注**：重建向量库时写入每条 chunk 的 `source` 原始链接，并在项目声明中附注「仅用于研究/教学演示，侵权即下架」；
 - **替换为授权语料**：采用 CC-BY 等明确授权文档或团队自建讲义，随提交附 `LICENSES` 清单。
 
-> 在处置完成前，知识库内容仅限内部研发与教学演示使用。详细处置步骤与责任声明见 `docs/KB_PROVENANCE.md`。
+> 在处置完成前，知识库内容仅限内部研发与教学演示使用。详细处置步骤与责任声明见 `internal/KB_PROVENANCE.md`。

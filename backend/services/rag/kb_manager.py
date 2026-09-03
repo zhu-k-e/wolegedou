@@ -310,7 +310,7 @@ def health_check() -> dict:
 
     Returns:
         {
-            "mode": "chromadb" | "stub",
+            "mode": "numpy" | "chromadb" | "stub",
             "chunk_count": int,
             "embedding_backend": "flag" | "st" | null,
             "chromadb_available": bool,
@@ -348,6 +348,9 @@ def health_check() -> dict:
 
     numpy_data_ok = _check_numpy_data_available()
     chromadb_ok = _check_chromadb_available()
+    embedding_ok = _check_embedding_available()
+    local_model_path = get_settings().project_root / get_settings().embedding_model_local_path
+    local_model_ready = local_model_path.exists() and (local_model_path / "config.json").exists()
 
     if isinstance(kb, NumpyKnowledgeBase):
         return {
@@ -356,7 +359,8 @@ def health_check() -> dict:
             "embedding_backend": EmbeddingService().backend,
             "numpy_data_available": True,
             "chromadb_available": chromadb_ok,
-            "embedding_available": True,
+            "embedding_available": embedding_ok,
+            "local_model_ready": local_model_ready,
             "data_dir": str(kb.data_dir),
             "message": f"Numpy 模式正常运行，当前 {kb.chunk_count} 个 chunk",
         }
@@ -368,6 +372,7 @@ def health_check() -> dict:
         "embedding_backend": EmbeddingService().backend,
         "numpy_data_available": numpy_data_ok,
         "chromadb_available": True,
-        "embedding_available": True,
+        "embedding_available": embedding_ok,
+        "local_model_ready": local_model_ready,
         "message": f"ChromaDB 模式正常运行，当前 {kb.chunk_count} 个 chunk",
     }

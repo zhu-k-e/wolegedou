@@ -3,142 +3,225 @@
 赛题：XH-202630 领域知识个性化生成与多智能体协同决策系统
 组件：FastAPI 多智能体后端（`backend/`）
 
+> 本说明每一步均对应仓库真实文件，可直接照做。
+> 字段名、路径、端口均以代码为准。
+
 ---
 
 ## 1. 环境要求
 
-- **Python 3.13**（项目依赖 `FlagEmbedding` / `bge-m3`，需在 3.13 下运行；系统自带 3.10 会因缺少 FlagEmbedding 触发降级，**不可用**）
-- 依赖见 `requirements.txt`
-- 运行需要一个 `.env` 配置文件（含 LLM API Key、端口等），模板见 `.env.example`
+| 项 | 要求 | 依据 |
+|---|---|---|
+| **Python** | **3.13（硬性）** | `Dockerfile:5` `FROM python:3.13-slim` |
+| 依赖 | `pip install -r requirements.txt`（已锁版本） | `requirements.txt` |
+| 配置 | 需要 `.env`（含 LLM API Key） | 模板 `.env.example` |
 
-### API Key 获取（自备，约 5 分钟）
-
-系统调用三档大模型 API，**需自备 Key**（模板见 `.env.example`，占位符 `sk-your-*` 处替换为真实 Key）：
-
-| 档位 | 平台 | 注册入口 | 说明 |
-|---|---|---|---|
-| MID（deepseek-chat） | DeepSeek 开放平台 | https://platform.deepseek.com | 国内注册，新用户有免费额度，价格极低 |
-| HIGH/LOW（qwen-max / qwen-turbo） | 阿里云百炼（DashScope） | https://bailian.console.aliyun.com | 国内注册，开通 DashScope 服务后创建 Key，有免费额度 |
-
-> 系统可只配 MID 档即可跑通核心链路（部分轻量判断会降级）；两个都配为完整档位。
-> 注意：API Key 为私有关键资产，**请勿提交到仓库/镜像/压缩包**（`.env` 已被 .gitignore 与 .dockerignore 双重排除）。
+⚠️ **不可用 Python 3.10**：缺少 `FlagEmbedding` 会导致知识库降级为 Stub，
+检索失效、指标失真。
 
 ---
 
-## 2. ⚠️ OpenMP 段错误（SIGSEGV）Workaround（必读）
+## 2. ⚠️ OpenMP 段错误 Workaround（必设）
 
-`bge-m3` / `FlagEmbedding` 在多线程 OpenMP 调度下偶发 **torch 段错误（SIGSEGV）**，
-表现为进程无堆栈直接崩溃，与具体版本无关（OpenMP 竞态）。
-
-**根治方法：强制单线程 OpenMP**。在启动前设置环境变量：
+`bge-m3` / `FlagEmbedding` 在多线程 OpenMP 下偶发 torch 段错误（SIGSEGV），
+与版本无关（OpenMP 竞态）。**根治方法：强制单线程**。
 
 ```bash
-export OMP_NUM_THREADS=1
+export OMP_NUM_THREADS=1     # Windows: set OMP_NUM_THREADS=1
 ```
 
-- 本地：`OMP_NUM_THREADS=1 uvicorn backend.main:app ...`
-- Docker：本仓库 `Dockerfile` 已内置 `ENV OMP_NUM_THREADS=1`
-- Windows（PyCharm / PowerShell）：在解释器启动环境或 `sitecustomize.py` 中设置；
-  本项目 `.venv` 已附带 `sitecustomize.py` 自动设置该变量，用 `.venv/Scripts/python.exe` 运行即可。
-
-> 评测 / benchmark 必须用项目自带的 `.venv/Scripts/python.exe`（Python 3.13 + 已装 FlagEmbedding + 已设 OMP 单线程），
-> 切勿用系统 Python 3.10 跑，否则知识库降级为 Stub、指标失真。
+- 本地：启动服务前执行
+- Docker：`Dockerfile:10` 已内置 `ENV OMP_NUM_THREADS=1`，无需额外设置
+- Windows：项目 `.venv` 已附带 `sitecustomize.py` 自动设置，用 `.venv/Scripts/python.exe` 即可
 
 ---
 
-## 3. 本地快速启动
+## 3. 配置 API Key（关键）
 
 ```bash
-cd <项目根>
-python -m venv .venv            # 若尚未创建
-.venv/Scripts/python.exe -m pip install -r requirements.txt
-
-cp .env.example .env            # 然后填入 LLM_API_KEY 等
-export OMP_NUM_THREADS=1        # Windows: set OMP_NUM_THREADS=1
-
-.venv/Scripts/python.exe -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+cp .env.example .env
 ```
 
-启动后：
+编辑 `.env`，**只需填这两个字段**（其余均有默认值，无需改动）：
 
-- 健康检查：`GET http://localhost:8000/health` → `{"status":"ok"}`
-- 接口文档（Swagger）：`http://localhost:8000/docs`
-- 业务路由前缀：`/api/*`（问答、状态、反馈、答题、知识库、报告）
-- 实时协同状态：`/ws`（WebSocket）
+```bash
+DEEPSEEK_API_KEY=sk-xxx    # DeepSeek 平台申请（中档模型 deepseek-chat）
+OPENAI_API_KEY=sk-xxx      # 阿里云 DashScope 申请（qwen-max / qwen-turbo，走 DashScope 的 OpenAI 兼容端点）
+```
+
+> ⚠️ **注意**：配置中**没有** `LLM_API_KEY` / `LLM_BASE_URL` 这类字段。
+> 字段名以 `.env.example` 为准（对应 `config.py` 的 `deepseek_api_key` / `openai_api_key`）。
+> 填错字段名会导致 Key 读不到、LLM 调用失败。
 
 ---
 
-## 4. Docker 部署
+## 4. 补齐大体积资产（clone 后必做）
+
+以下两项因体积超限**不在 Git 仓库中**（见 `.gitignore`），缺其一则 RAG 检索不可用。
+
+### 4.1 bge-m3 嵌入模型（约 2.27GB）
 
 ```bash
-# 构建
+# 方式 A（推荐）
+python scripts/fetch_assets.py --model-only
+
+# 方式 B：手动
+git clone https://hf-mirror.com/BAAI/bge-m3 data/bge_m3_model
+```
+
+### 4.2 预计算向量库 numpy_kb（分卷已在仓库）
+
+`vectors.npy`（133MB）超过 GitHub 单文件 100MB 限制，仓库中以
+`vectors.npy.part0` / `.part1` 分卷提交（每卷约 67MB）。
+
+```bash
+python scripts/fetch_assets.py --check
+# 期望输出：bge_m3: OK / numpy_kb: OK
+```
+
+该命令会自动把分卷合并为完整的 `data/numpy_kb/vectors.npy`。
+手动合并：
+
+```bash
+# Linux / macOS / Git Bash
+cat data/numpy_kb/vectors.npy.part* > data/numpy_kb/vectors.npy
+
+# Windows CMD
+copy /b data\numpy_kb\vectors.npy.part0 + data\numpy_kb\vectors.npy.part1 data\numpy_kb\vectors.npy
+
+# Windows PowerShell
+Get-Content data\numpy_kb\vectors.npy.part0, data\numpy_kb\vectors.npy.part1 -Raw -AsByteStream |
+    Set-Content data\numpy_kb\vectors.npy -NoNewline -AsByteStream
+```
+
+---
+
+## 5. 启动
+
+### 方式 A：本地启动
+
+```bash
+export OMP_NUM_THREADS=1     # Windows: set OMP_NUM_THREADS=1
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+### 方式 B：Docker
+
+```bash
 docker build -t wolegedou-backend .
 
-# 运行（用 --env-file 注入密钥，切勿把 .env 打进镜像）
 docker run -d --name wolegedou \
   --env-file .env \
   -p 8000:8000 \
   wolegedou-backend
 ```
 
-说明：
-
-- `Dockerfile` 已内置 `ENV OMP_NUM_THREADS=1`，无需额外设置。
-- `.env` **不进镜像**（含 API Key），请用 `--env-file` 或 `-e` 注入。
-- **知识库切片已随镜像分发**：`data/numpy_kb/` 以 `vectors.npy.part0` / `.part1` 分卷
-  随仓库提交并 `COPY` 进镜像；容器启动时由 `docker-entrypoint.sh` **自动合并**为完整
-  `vectors.npy`（RAG 加载器硬性要求该文件），无需手动执行。
-- **bge-m3 嵌入模型**：镜像**不内置**该模型（约 2.2GB）。容器首次启动若检测到
-  `data/bge_m3_model/` 缺失，会**自动**从 hf-mirror 国内镜像 `git clone` 拉取（需外网，
-  耗时视带宽）。若构建/运行环境无外网，请预先把本地已下载的 `data/bge_m3_model` 以
-  `-v "$(pwd)/data:/app/data"` 挂载进容器，或构建前将其放入 `data/`。
-- 如需用宿主机数据覆盖镜像内数据（如自行替换知识库），仍可加
-  `-v "$(pwd)/data:/app/data"`；entrypoint 会在挂载目录上同样完成分卷合并。
-- 端口默认 8000，可由 `PORT` 环境变量覆盖。
+Docker 说明：
+- `docker-entrypoint.sh` 会**自动合并分卷**，并在 `data/bge_m3_model/` 缺失时尝试拉取
+- `.env` **不进镜像**，用 `--env-file` 注入
+- 若无外网，请预先把 `data/bge_m3_model` 放入 `data/`，或挂载：`-v "$(pwd)/data:/app/data"`
+- 端口默认 8000，可用 `PORT` 环境变量覆盖
 
 ---
 
-## 5. 知识库切片（赛题测试数据要求）
+## 6. 验证
 
-赛题要求至少提交 **1 个垂直领域的专业知识库切片**。本项目提供：
+### 6.1 启动日志（看到这些行即表示启动成功）
 
-- `data/numpy_kb/`（轻量、可随镜像分发，用于离线评测与演示）
-- Chroma 向量库切片（较大，单独提供 / 挂载，不并入镜像）
+启动后控制台会**依次输出**以下关键行，请确认：
 
-初始化在应用启动时自动执行（`backend/main.py` 的 `lifespan` → `init_knowledge_base`）。
+```
+正在初始化数据库...
+数据库已就绪: <项目根>/data/wolegedou.db
+正在初始化知识库...
+[NumpyKB] 加载完成: 30532 chunks, dim=1024
+[知识库] 初始化成功 (Numpy 模式), 当前 chunk 数: 30532
+多智能体协同决策系统启动完成
+Uvicorn running on http://0.0.0.0:8000
+```
+
+> ⚠️ 若看到 `[知识库] Numpy 后端初始化失败`、`FlagEmbedding 加载失败`，
+> 或 chunk 数远小于 30532，说明知识库未正确加载
+> （通常是第 4 节分卷未合并或 bge-m3 模型缺失），请补齐资产后重启。
+
+> ℹ️ **关于 "Embedding 模型加载成功"**：该行出现在**首次 RAG 查询**时（模型懒加载），
+> 不在 uvicorn 启动阶段。启动后先调一次 `/api/ask` 或 `/api/kb/search`，
+> 控制台才会打印 `Embedding 模型加载成功 (后端: FlagEmbedding)`。
+
+### 6.2 接口验证
+
+```bash
+# 1) 健康检查
+curl http://localhost:8000/health
+# 预期：{"status":"ok"}
+
+# 2) 知识库健康检查
+curl http://localhost:8000/api/kb/health
+# 预期（冷启动、尚未发生任何查询时）：
+#   {"mode":"numpy","chunk_count":30532,"embedding_backend":null,"local_model_ready":true,...}
+# 预期（首次查询后，模型完成懒加载）：
+#   {"mode":"numpy","chunk_count":30532,"embedding_backend":"flag","local_model_ready":true,...}
+#   mode                —— numpy（预计算向量库）
+#   chunk_count         —— 30532（34154 条原始 chunk 过滤非中英文后的可用数）
+#   embedding_backend   —— 冷启动未加载时为 null；首次 RAG 调用后变为 "flag"（FlagEmbedding 后端）；
+#                         降级时为 "st"（sentence-transformers）
+#   local_model_ready   —— true 表示本地 bge-m3 模型已就绪；false 表示首次查询会尝试从 HuggingFace 在线下载（慢/易失败）
+
+# 3) 接口文档（Swagger）
+# 浏览器打开 http://localhost:8000/docs
+```
+
+主流程验证（学情诊断 → 生成 → 审核 → 裁判 → 交付）：
+
+```bash
+curl -X POST http://localhost:8000/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"什么是RAG","session_id":"sess_001","profile":{"background":"有Python基础","knowledge_level":"中级","current_goal":"项目落地","question_type":"操作步骤","domain_hint":["RAG"]}}'
+```
+
+> 完整响应字段见 `backend/api/schemas.py` 的 `AskResponse`。
+> `background` 取值：文科 / 理科_无编程 / 有Python基础 / 有ML基础
+> `knowledge_level` 取值：入门 / 中级 / 进阶
+
+### 接口一览
+
+| 类型 | 路径 | 说明 |
+|---|---|---|
+| 业务 | `/api/ask`、`/api/status/{task_id}`、`/api/quiz_submit`、`/api/feedback`、`/api/kb/*`、`/api/report/{session_id}` | 见 `backend/api/routes/` |
+| 实时 | `ws://localhost:8000/ws/{task_id}` | FSM 状态实时推送 |
+| 运维 | `/health`、`/docs` | 健康检查 / Swagger |
 
 ---
 
-## 6. 评测与验证
-
-覆盖率 / 适配 / 幻觉 / 谬误 4 指标由 `backend/scripts/validate_metrics.py` 真测：
+## 7. 指标复现
 
 ```bash
 export OMP_NUM_THREADS=1
-.venv/Scripts/python.exe -m backend.scripts.validate_metrics --bm-only
-```
 
-- `--bm-only`：仅评测 `bm_` 前缀的 benchmark 会话（100 条）
-- `--no-kb`：跳过独立知识库召回率测试（更快聚焦 4 指标）
-- 报告输出至 `docs/metrics_validation_report.md`
+# 4 项核心指标（覆盖率 / 适配 / 幻觉 / 谬误）
+python -m backend.scripts.validate_metrics --bm-only
+# 报告输出至 docs/metrics_validation_report.md
 
-单元测试（含"领域知识生成准确性"核心度量逻辑）：
-
-```bash
-export OMP_NUM_THREADS=1
-.venv/Scripts/python.exe -m pytest backend/tests/ -v
+# 单元测试
+python -m pytest backend/tests/ -v
 ```
 
 ---
 
-## 7. 开放评审权限（赛题提交硬要求）
+## 8. 数据合规
 
-赛题要求：私有仓库需开放评审权限；或提供开源链接 / 压缩包 + 云盘。
+- `.env`（含 API Key）已在 `.gitignore` 中，**不随源码泄露**
+- 知识库来源合规处置：见 `docs/SETUP.md` 第 7 节
 
-- **GitHub 私有仓库开放**：仓库 `Settings → Manage access → Invite teams or people`，
-  将发榜单位指定评审账号加入（或可临时改为 Public 至评审结束）；
-  务必在 **2026-09-05 前** 完成开放。
-- **或提供可运行交付物**：源码压缩包 + 部署说明 + 测试数据，上传至安全云盘，
-  将链接 / 提取码 / 上传时间截图随作品提交至邮箱 `602808600@qq.com`。
+---
 
-> 提交前请确认 `.env`（含 API Key）已加入 `.gitignore`，不随源码泄露。
+## 9. 开放评审权限（赛题提交硬要求）
+
+赛题要求：私有仓库需开放评审权限，或提供开源链接 / 压缩包 + 云盘。
+
+- **GitHub 开放**：`Settings → Manage access → Invite teams or people`，
+  将发榜单位指定评审账号加入（或临时改为 Public 至评审结束）
+- **或提供可运行交付物**：源码压缩包 + 部署说明 + 测试数据上传安全云盘，
+  将链接 / 提取码 / 上传时间截图随作品提交至邮箱 `602808600@qq.com`
+
+> **务必在 2026-09-05 前完成。**

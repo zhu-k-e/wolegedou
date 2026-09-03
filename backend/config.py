@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     embedding_model_local_path: str = "data/bge_m3_model"
 
     # --- 服务 ---
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
     log_level: str = "INFO"
@@ -79,8 +79,8 @@ class Settings(BaseSettings):
     # --- 超时 ---
     # 必须 >= max_tokens / 模型输出速度下限。域Agent候选生成/聚焦用 max_tokens=4096，
     # 按 30~60 token/s 需 68~136s；曾误设为 30s，导致长输出必然超时抛异常（整段丢失，
-    # 非截断），触发资源包整体降级。配合 llm_client 的 max_retries=1，最坏 120×2=240s。
-    llm_timeout: int = 120
+    # 非截断），触发资源包整体降级。配合 llm_client 的 max_retries=1，最坏 150×2=300s。
+    llm_timeout: int = 150
     fsm_max_revisions: int = 2
 
     # --- CORS / 安全 ---

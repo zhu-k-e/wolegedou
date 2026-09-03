@@ -33,7 +33,8 @@ COPY data/ ./data/
 
 # 启动入口：合并分卷 + 尽力拉取 bge-m3 模型，再启动服务
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x ./docker-entrypoint.sh
+# 防止 Windows  clone 导致 CRLF 换行符破坏 shell 脚本执行
+RUN sed -i 's/\r$//' ./docker-entrypoint.sh && chmod +x ./docker-entrypoint.sh
 
 EXPOSE 8000
 
