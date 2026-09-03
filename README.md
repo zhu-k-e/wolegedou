@@ -114,11 +114,12 @@ wolegedou/
 │       ├── test_json_validator.py  # JSON 三层兜底测试
 │       └── test_schemas.py         # Schema 校验测试
 │
-├── data/                           # 运行数据（不入 Git，见 .gitignore）
-│   ├── wolegedou.db                # SQLite 数据库（自动创建）
-│   └── numpy_kb/                   # 预计算向量数据（从网盘下载，见「知识库数据部署」）
-│       ├── vectors.npy             # (34154, 1024) float32，已 L2 归一化
-│       ├── documents.json          # 34154 条文档原文
+├── data/                           # 运行数据（不入 Git，见 .gitignore；提交包内已含）
+│   ├── wolegedou.db                # SQLite 数据库（首次启动自动创建）
+│   ├── bge_m3_model/               # bge-m3 嵌入模型（约 2.27GB，提交包内已含）
+│   └── numpy_kb/                   # 预计算向量数据（提交包内已含，或仓库分卷合并）
+│       ├── vectors.npy             # (30532, 1024) float32，已 L2 归一化
+│       ├── documents.json          # 30532 条文档原文
 │       ├── metadatas.json          # 元数据（source/applicable_agents/section_path 等）
 │       └── ids.json                # chunk id 列表
 │
@@ -177,33 +178,29 @@ OPENAI_MINI_MODEL=qwen-turbo
 
 > **换模型不用改代码**：代码用 OpenAI 兼容协议，只要服务商支持 `/v1/chat/completions` 接口，改 `.env` 即可切换。
 
-### 3. 补齐大体积资产（必做）
+### 3. 大体积资产（提交包已含，解压即用）
 
-以下两项因体积超限**不在 Git 仓库中**（见 `.gitignore`），缺其一则 RAG 检索不可用。
+> 按赛题提交方式（八、(二)），提交包为自包含：模型与知识库**已随包提供**，
+> 评委解压后无需外网。下列命令仅作「自行重新获取」兜底。
 
 #### 3.1 bge-m3 嵌入模型（约 2.27GB）
 
+提交包内已含 `data/bge_m3_model/`。兜底（仅当包内缺失时）：
+
 ```bash
 python scripts/fetch_assets.py --model-only
+# 或手动：git clone https://hf-mirror.com/BAAI/bge-m3 data/bge_m3_model
 ```
 
-或手动：
+#### 3.2 预计算向量库 numpy_kb
 
-```bash
-git clone https://hf-mirror.com/BAAI/bge-m3 data/bge_m3_model
-```
-
-#### 3.2 预计算向量库 numpy_kb（分卷已在仓库）
-
-`vectors.npy`（约 133MB）超过 GitHub 单文件 100MB 限制，仓库中以
-`vectors.npy.part0` / `.part1` 分卷提交（每卷约 67MB）。clone 后执行：
+提交包内已合并为完整 `data/numpy_kb/vectors.npy`；Git 仓库中为分卷，
+`scripts/start_server.py` 启动时会自动合并。手动合并：
 
 ```bash
 python scripts/fetch_assets.py --check
 # 期望输出：bge_m3: OK / numpy_kb: OK
 ```
-
-该命令会自动把分卷合并为完整的 `data/numpy_kb/vectors.npy`。
 
 **验证部署成功**：
 

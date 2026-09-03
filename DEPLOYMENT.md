@@ -55,11 +55,17 @@ OPENAI_API_KEY=sk-xxx      # 阿里云 DashScope 申请（qwen-max / qwen-turbo�
 
 ---
 
-## 4. 补齐大体积资产（clone 后必做）
+## 4. 大体积资产（提交包已含，解压即用）
 
-以下两项因体积超限**不在 Git 仓库中**（见 `.gitignore`），缺其一则 RAG 检索不可用。
+> **赛题提交方式（八、(二)）**：作品统一打包提交，过大则上传云盘。
+> 因此本项目的**提交包为自包含**——`data/bge_m3_model/`（嵌入模型，约 2.27GB）
+> 与 `data/numpy_kb/`（预计算向量库）**已随包提供**，评委**解压后无需任何外网**即可运行。
+> 本节仅说明资产构成，以及「自行重新获取」的兜底方式。
 
 ### 4.1 bge-m3 嵌入模型（约 2.27GB）
+
+提交包内已含 `data/bge_m3_model/`（BAAI/bge-m3）。无需下载。
+兜底（仅当包内缺失时）：
 
 ```bash
 # 方式 A（推荐）
@@ -69,18 +75,13 @@ python scripts/fetch_assets.py --model-only
 git clone https://hf-mirror.com/BAAI/bge-m3 data/bge_m3_model
 ```
 
-### 4.2 预计算向量库 numpy_kb（分卷已在仓库）
+### 4.2 预计算向量库 numpy_kb（分卷已在仓库，提交包内已合并）
 
-`vectors.npy`（133MB）超过 GitHub 单文件 100MB 限制，仓库中以
-`vectors.npy.part0` / `.part1` 分卷提交（每卷约 67MB）。
+`vectors.npy`（133MB）超过 GitHub 单文件 100MB 限制，Git 仓库中以
+`vectors.npy.part0` / `.part1` 分卷提交；**提交包内已合并为完整 `vectors.npy`**。
+启动器 `scripts/start_server.py` 会在启动时自动检测并合并分卷（如仅有分卷）。
 
-```bash
-python scripts/fetch_assets.py --check
-# 期望输出：bge_m3: OK / numpy_kb: OK
-```
-
-该命令会自动把分卷合并为完整的 `data/numpy_kb/vectors.npy`。
-手动合并：
+手动合并（仅在仅有分卷时）：
 
 ```bash
 # Linux / macOS / Git Bash
@@ -94,18 +95,30 @@ Get-Content data\numpy_kb\vectors.npy.part0, data\numpy_kb\vectors.npy.part1 -Ra
     Set-Content data\numpy_kb\vectors.npy -NoNewline -AsByteStream
 ```
 
+> 组装自包含提交包见 `scripts/assemble_submission.py`；一键启动见第 5 节。
+
 ---
 
 ## 5. 启动
 
-### 方式 A：本地启动
+### 方式 A（推荐）：一键启动器
+
+启动器会自动设置 `OMP_NUM_THREADS=1`（避免 bge-m3 段错误）、
+自动合并知识库分卷、预检模型与 Key，再拉起服务：
+
+```bash
+python scripts/start_server.py                 # 默认 0.0.0.0:8000
+python scripts/start_server.py --port 8080      # 自定义端口
+```
+
+### 方式 B：手动启动
 
 ```bash
 export OMP_NUM_THREADS=1     # Windows: set OMP_NUM_THREADS=1
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 方式 B：Docker
+### 方式 C：Docker
 
 ```bash
 docker build -t wolegedou-backend .
