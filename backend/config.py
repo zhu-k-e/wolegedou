@@ -1,8 +1,14 @@
 """全局配置模块 - 从环境变量加载所有配置项"""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
+try:
+    from dotenv import dotenv_values
+except ImportError:  # python-dotenv 为声明依赖；缺失时仅禁用旧名兜底，不影响主流程
+    dotenv_values = None
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -116,6 +122,51 @@ class Settings(BaseSettings):
     def project_root(self) -> Path:
         """项目根目录"""
         return Path(__file__).resolve().parent.parent
+
+    @model_validator(mode="before")
+    @classmethod
+    def _alias_legacy_env(cls, data: dict) -> dict:
+        """兼容方案文档 §4.2.4 旧版变量名，避免评委严格按文档配置后 LLM / 知识库不可用。
+
+        旧名（方案文档早期版本）→ 新名（实际代码字段）：
+          DASHSCOPE_API_KEY      → openai_api_key   (+ openai_base_url 指向 DashScope 兼容端点)
+          KB_PATH                → kb_numpy_dir
+          SQLITE_PATH            → db_path
+          MODEL_TIER_LOW         → openai_mini_model
+          MODEL_TIER_MID         → deepseek_model
+          MODEL_TIER_HIGH        → openai_model
+        仅当新名字段为空时才用旧名兜底，不影响正常配置。
+        """
+        data = dict(data) if data else {}
+        # 直接读取项目根 .env（pydantic 不会把 dotenv 值回灌到 os.environ，
+        # 这里用 dotenv_values 读取以保证旧名即使在 .env 中也能被识别）
+        try:
+            envf = Path(__file__).resolve().parent.parent / ".env"
+            kv = dotenv_values(envf) if (dotenv_values is not None and envf.exists()) else {}
+        except Exception:
+            kv = {}
+        merged: dict = {}
+        for k, v in kv.items():
+            if v:
+                merged[k] = v
+        merged.update({k: v for k, v in os.environ.items() if v})
+        merged.update({k: v for k, v in data.items() if v})
+
+        def alias(field: str, legacy: str, default: str | None = None) -> None:
+            if not data.get(field) and merged.get(legacy):
+                data[field] = merged[legacy]
+                if default is not None:
+                    data.setdefault(default, merged[legacy])
+
+        if not data.get("openai_api_key") and merged.get("DASHSCOPE_API_KEY"):
+            data["openai_api_key"] = merged["DASHSCOPE_API_KEY"]
+            data.setdefault("openai_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        alias("kb_numpy_dir", "KB_PATH")
+        alias("db_path", "SQLITE_PATH")
+        alias("openai_mini_model", "MODEL_TIER_LOW")
+        alias("deepseek_model", "MODEL_TIER_MID")
+        alias("openai_model", "MODEL_TIER_HIGH")
+        return data
 
 
 @lru_cache

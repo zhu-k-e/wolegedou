@@ -44,21 +44,32 @@ def _yellow(msg: str) -> str:
 
 
 def check_env_file() -> bool:
-    """检查 .env 是否存在且含必要 key。缺失仅警告（/health 仍可起，但 LLM 调用会失败）。"""
+    """检查 .env 是否存在且含必要 key。缺失仅警告（/health 仍可起，但 LLM 调用会失败）。
+
+    兼容两套变量名：
+      · qwen（高/低档）可用 OPENAI_API_KEY（默认 DashScope 兼容端点）或旧名 DASHSCOPE_API_KEY
+      · 中档用 DEEPSEEK_API_KEY
+    """
     env_path = os.path.join(ROOT, ".env")
     if not os.path.isfile(env_path):
         print(_yellow("⚠ 未找到 .env：复制 .env.example 为 .env 并填入 "
-                       "DEEPSEEK_API_KEY 与 OPENAI_API_KEY 后，LLM 生成类接口才可用。"))
-        print(_yellow("  cp .env.example .env   # 然后编辑 .env 填入两个 Key"))
+                       "DEEPSEEK_API_KEY 与 OPENAI_API_KEY（或 DASHSCOPE_API_KEY）后，"
+                       "LLM 生成类接口才可用。"))
+        print(_yellow("  cp .env.example .env   # 然后编辑 .env 填入 Key"))
         return False
     with open(env_path, "r", encoding="utf-8") as f:
         content = f.read()
-    missing = [k for k in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY") if f"{k}=" not in content]
+    missing = []
+    if "DEEPSEEK_API_KEY=" not in content:
+        missing.append("DEEPSEEK_API_KEY")
+    # qwen 高/低档：OPENAI_API_KEY 或旧名 DASHSCOPE_API_KEY 任一即可
+    if ("OPENAI_API_KEY=" not in content) and ("DASHSCOPE_API_KEY=" not in content):
+        missing.append("OPENAI_API_KEY 或 DASHSCOPE_API_KEY")
     if missing:
         print(_yellow(f"⚠ .env 缺少必要字段：{', '.join(missing)}。LLM 生成类接口将不可用，"
                       "请补全后重启。"))
         return False
-    print(_green("✓ .env 配置完整（DEEPSEEK_API_KEY / OPENAI_API_KEY 均已设置）"))
+    print(_green("✓ .env 配置完整（DEEPSEEK_API_KEY 与 OPENAI_API_KEY/DASHSCOPE_API_KEY 均已设置）"))
     return True
 
 
